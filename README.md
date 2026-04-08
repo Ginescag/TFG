@@ -39,6 +39,3 @@ tfg-robot-patrulla/
 ├── frontend/             # Web application (React/Vue)
 └── robot_ws/             # ROS 2 Colcon workspace (TurtleBot 4 code)
     └── src/
-        ├── tb4_patrol/   # Navigation and waypoint logic
-        ├── tb4_vision/   # Camera capture and YOLOv8 inference
-        └── tb4_bridge/   # IoT translation node (ROS 2 <-> Kafka)
