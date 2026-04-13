@@ -1,6 +1,5 @@
 # --- Framework Core ---
 fastapi                   # Framework web asíncrono de alto rendimiento
-flask                     # Framework web ligero para tareas específicas o microservicios
 uvicorn[standard]         # Servidor ASGI para ejecutar la aplicación FastAPI
 
 # --- Base de Datos Relacional (PostgreSQL) ---
