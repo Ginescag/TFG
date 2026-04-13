@@ -1,0 +1,28 @@
+# --- Framework Core ---
+fastapi                   # Framework web asíncrono de alto rendimiento
+flask                     # Framework web ligero para tareas específicas o microservicios
+uvicorn[standard]         # Servidor ASGI para ejecutar la aplicación FastAPI
+
+# --- Base de Datos Relacional (PostgreSQL) ---
+sqlalchemy                # ORM moderno para interactuar con la base de datos
+psycopg2-binary           # Adaptador de base de datos PostgreSQL para Python
+alembic                   # Herramienta de migraciones para el esquema de base de datos
+
+# --- Base de Datos de Series Temporales (InfluxDB) ---
+influxdb-client           # Cliente oficial para enviar telemetría a InfluxDB 2.x
+
+# --- Mensajería y Eventos (Kafka) ---
+confluent-kafka           # Cliente de Kafka de alto rendimiento basado en C
+
+# --- Almacenamiento de Archivos (S3 / MinIO) ---
+boto3                     # SDK de AWS para interactuar con MinIO (vídeos/fotos)
+
+# --- Seguridad y Autenticación ---
+python-jose[cryptography] # Generación y validación de tokens JWT
+passlib[bcrypt]           # Cifrado seguro de contraseñas de usuarios
+python-multipart          # Soporte para subida de archivos y formularios en FastAPI
+
+# --- Utilidades y Configuración ---
+pydantic                  # Validación de datos y tipos de datos (Esquemas)
+pydantic-settings         # Gestión de configuraciones mediante variables de entorno (.env)
+httpx                     # Cliente HTTP asíncrono (útil para webhooks o llamadas externas)

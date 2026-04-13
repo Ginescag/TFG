@@ -1,0 +1,30 @@
+Propuesta TFG – Robot de patrulla indoor con TB4
+Idea general
+
+El proyecto busca montar un sistema de patrulla y vigilancia en interiores usando un TurtleBot4 (TB4). La idea es que el robot pueda moverse de forma autónoma dentro de un edificio, detectar intrusos o mascotas, y enviar vídeo y alertas en tiempo real a un panel web. Todo quedará registrado en una base de datos con métricas que se podrán ver en un dashboard.
+
+Objetivos principales
+
+Que el TB4 pueda moverse solo por un mapa indoor (SLAM + Nav2).
+
+Integrar un detector ligero (YOLOv8n o similar) para reconocer personas/mascotas.
+
+Streaming de vídeo desde la cámara del TB4 a un cliente.
+
+Un panel web para ver lo que pasa, lanzar la patrulla, reproducir audio por el altavoz, etc.
+
+Guardar en una BBDD los eventos/incidentes y mostrar métricas en Grafana.
+
+(posibilidad) Añadir tracking multi‑objeto (DeepSORT/ByteTrack) para seguir a cada intruso con un ID.
+
+(posibilidad) Clasificar incidentes: diferenciar si es un intruso, una mascota o un objeto raro.
+
+Cómo se conecta todo
+
+TB4 (ROS2): hace SLAM, sigue rutas con Nav2, lanza el detector y envía vídeo.
+
+Servidor: recibe alertas del robot, gestiona la patrulla, guarda incidentes en BBDD, maneja métricas y hace de puente con el cliente.
+
+Cliente web: muestra el vídeo, el mapa, estado de la batería, lista de incidentes y permite dar órdenes.
+
+Dashboard Grafana: enseña métricas como latencia, FPS, falsos positivos, cobertura de patrulla, batería, etc.
