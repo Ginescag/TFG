@@ -9,7 +9,7 @@ CREATE TABLE usuarios (
     tlf VARCHAR(20),
     email VARCHAR(150) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
-    rol VARCHAR(20) DEFAULT 'vigilante',
+    rol VARCHAR(20) DEFAULT 'user', -- 'admin' o 'user'
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -17,7 +17,7 @@ CREATE TABLE usuarios (
 CREATE TABLE robots (
     id VARCHAR(50) PRIMARY KEY,          
     usuario_id INT REFERENCES usuarios(id) ON DELETE CASCADE,
-    secret_hash VARCHAR(255) NOT NULL,   
+    secret_hash VARCHAR(255), -- Puede ser NULL inicialmente, se genera cuando el robot se bootea por primera vez (TOFU: Trust On First Use)
     alias VARCHAR(50),                   
     estado_conexion VARCHAR(20) DEFAULT 'offline', -- Solo actualiza al conectar/desconectar
     estado_operativo VARCHAR(30) DEFAULT 'idle',   

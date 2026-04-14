@@ -7,6 +7,12 @@ class Settings(BaseSettings):
     port: int = 8000
 
     # --- 2. Base de Datos (PostgreSQL) ---
+    postgres_host: str
+    postgres_port: int
+    postgres_user: str
+    postgres_password: str
+    postgres_db: str
+
     database_url: str
 
     # --- 3. Mensajería (Kafka) ---
@@ -19,10 +25,16 @@ class Settings(BaseSettings):
     minio_bucket_name: str
 
     # --- 5. Telemetría (InfluxDB) ---
+    influxdb_user: str
+    influxdb_password: str
     influxdb_url: str
     influxdb_token: str
     influxdb_org: str
     influxdb_bucket: str
+
+    #--- 7. grafana ---
+    gf_admin_user: str
+    gf_admin_password: str
 
     # --- 6. Seguridad (JWT) ---
     secret_key: str
@@ -34,5 +46,7 @@ class Settings(BaseSettings):
         env_file = ".env"
         # Aseguramos que lea bien caracteres especiales
         env_file_encoding = "utf-8"
+
+        extra = "ignore"  # Ignora variables no definidas en esta clase
 
 settings = Settings()

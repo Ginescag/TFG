@@ -25,3 +25,4 @@ python-multipart          # Soporte para subida de archivos y formularios en Fas
 pydantic                  # Validación de datos y tipos de datos (Esquemas)
 pydantic-settings         # Gestión de configuraciones mediante variables de entorno (.env)
 httpx                     # Cliente HTTP asíncrono (útil para webhooks o llamadas externas)
+uuid                      # Generación de identificadores únicos
