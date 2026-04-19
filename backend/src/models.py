@@ -4,6 +4,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import UUID
 from src.database import Base
+from datetime import datetime, timezone
 
 class Usuario(Base):
     __tablename__ = "usuarios"
@@ -42,7 +43,7 @@ class Robot(Base):
     estado_operativo = Column(String(30), default="idle")
     
     # Timestamps
-    ultima_actividad = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    ultima_actividad = Column(DateTime(timezone=True), server_default=func.now(), onupdate=lambda: datetime.now(timezone.utc))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships

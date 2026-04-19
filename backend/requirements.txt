@@ -17,7 +17,7 @@ confluent-kafka           # Cliente de Kafka de alto rendimiento basado en C
 boto3                     # SDK de AWS para interactuar con MinIO (vídeos/fotos)
 
 # --- Seguridad y Autenticación ---
-python-jose[cryptography] # Generación y validación de tokens JWT
+pyjwt                     # Generación y verificación de tokens JWT para autenticación
 passlib[bcrypt]           # Cifrado seguro de contraseñas de usuarios
 python-multipart          # Soporte para subida de archivos y formularios en FastAPI
 

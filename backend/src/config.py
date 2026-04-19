@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     # --- 6. Seguridad (JWT) ---
     secret_key: str
     algorithm: str = "HS256"
-    access_token_expire_minutes: int = 1440
+    access_token_expire_minutes: int = 1440 # 24 horas
 
     class Config:
         # Le indicamos que busque las variables en el archivo .env de la raíz

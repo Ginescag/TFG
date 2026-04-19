@@ -41,6 +41,12 @@ class UsuarioActualizarPassword(BaseModel):
     oldPassword: str
     newPassword: str
 
+class UsuarioJWTRespuesta(BaseModel):
+    """Respuesta tras un login exitoso, contiene el token y datos básicos del usuario"""
+    access_token: str
+    token_type: str = "bearer"
+    user_id: int
+    rol: str
 
 # ==========================================
 # 2. ROBOT SCHEMAS
@@ -70,6 +76,23 @@ class RobotFirstBootRespuesta(BaseModel):
     robot_id: str
     secret: str  # secret generated on first boot (TOFU) that the robot will use for future authentication
 
+
+class RobotAuthParams(BaseModel):
+    """Datos que envía el robot para autenticarse (ocultos en el Body)"""
+    secret_key: str
+class RobotJWTRespuesta(BaseModel):
+    """Data returned to the robot after successful authentication, containing the JWT token"""
+    access_token: str
+    token_type: str = "bearer"
+
+class RobotHeartbeat(BaseModel):
+    """Data sent by the robot in each heartbeat to update its status"""
+    estado_operativo: Optional[str] = None  # El robot puede enviar su nuevo estado operativo
+
+class robotRespuestaDelete(BaseModel):
+    """Data returned after successfully deleting a robot"""
+    status: str = "robot_deleted"
+    robot_id: str
 
 # ==========================================
 # 3. INCIDENTE SCHEMAS
