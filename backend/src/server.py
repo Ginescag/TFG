@@ -1,15 +1,21 @@
-import datetime
+
+import json
+import threading
+import uvicorn
 
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from influxdb_client import InfluxDBClient, Point, WritePrecision
+from influxdb_client.client.write_api import SYNCHRONOUS
+from confluent_kafka import Consumer, KafkaError
 
-from src.dependencies import get_current_user, get_current_robot
+from src.dependencies import get_current_admin, get_current_user, get_current_robot
 from src.config import settings
-from src.database import get_db
+from src.database import SessionLocal, get_db
 from src.models import Usuario, Robot, Incidente
 from src.schemas import IncidenteRespuesta, RobotAuthParams, RobotHeartbeat, RobotJWTRespuesta, UsuarioActualizar, UsuarioActualizarPassword, UsuarioBase, UsuarioJWTRespuesta, UsuarioLogin, UsuarioRegistro, UsuarioRespuesta, RobotAlta, RobotRespuesta, RobotFirstBootRespuesta, robotRespuestaDelete
-from src.security import get_password_hash, verify_password, generar_secreto_robot, generate_jwt_token
+from src.security import get_password_hash, verificar_token, verify_password, generar_secreto_robot, generate_jwt_token
 
 # 1. Initialize the FastAPI application
 app = FastAPI(
@@ -52,142 +58,270 @@ async def health_check():
     }
 
 
-# 4. ROBOT ENDPOINTS
+#============================
+# 3. KAFKA SETTINGS
+#============================
 
-#USER --> SERVER --> ROBOT
-@app.put(
-        "/robot/{robot_id}/start-patrol",
-        response_model=RobotRespuesta,
-        status_code=status.HTTP_200_OK,
-        tags=["Robots"]
-        )
-async def start_patrol(robot_id: str,current_user: Usuario = Depends(get_current_user), db: Session = Depends(get_db)):
+
+def create_server_consumers():
+
     """
-    Endpoint to start the patrol of a specific robot.
+    Function to create Kafka consumers for incidents and telemetry.
+    We will have two separate consumers to handle the different topics independently.
     """
 
-    robot = db.query(Robot).filter(Robot.id == robot_id).first()
-    if not robot:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Robot not found"
-        )
+    incident_consumer = Consumer({
+        'bootstrap.servers': settings.kafka_broker_url,
+        'group.id': 'incident-consumer',
+        'auto.offset.reset': 'earliest'
+    })
     
-    if robot.usuario_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to control this robot"
-        )
+    incident_consumer.subscribe([settings.kafka_incident_topic])
 
-    robot.estado_operativo = "patrolling"
-    db.commit()
-    db.refresh(robot)
+    telemetry_consumer = Consumer({
+        'bootstrap.servers': settings.kafka_broker_url,
+        'group.id': 'telemetry-consumer',
+        'auto.offset.reset': 'latest'
+    })
 
-    return robot
+    telemetry_consumer.subscribe([settings.kafka_telemetry_topic])
+    
+    return incident_consumer, telemetry_consumer
+
+
+#============================
+# 4. ROBOT ENDPOINTS
+#============================
 
 #ROBOT --> SERVER (HEARTBEAT)
 @app.put(
-        "/robot/{robot_id}/heartbeat",  # ¡Mucho más claro!
+        "/robot/heartbeat",
         response_model=RobotRespuesta, 
         status_code=status.HTTP_200_OK,
         tags=["Robots"]
         )
-async def robot_heartbeat(robot_id: str, heartbeat: RobotHeartbeat, db: Session = Depends(get_db)):
+async def robot_heartbeat(heartbeat: RobotHeartbeat, curr_robot: Robot = Depends(get_current_robot), db: Session = Depends(get_db)):
     """
     Endpoint de 'Latido' (Heartbeat).
     El robot llama a esta ruta cada X segundos para avisar al servidor de que sigue online.
     """
-    robot = db.query(Robot).filter(Robot.id == robot_id).first()
-    if not robot:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Robot not found"
-        )
         
-    robot.estado_conexion = "online" 
+    curr_robot.estado_conexion = "online" 
     if heartbeat.estado_operativo is not None:
-        robot.estado_operativo = heartbeat.estado_operativo
+        curr_robot.estado_operativo = heartbeat.estado_operativo
     db.commit()
-    db.refresh(robot)
+    db.refresh(curr_robot)
     
-    return robot
+    return curr_robot
 
-#USER --> SERVER --> ROBOT
-@app.put(
-        "/robot/{robot_id}/stop-patrol",
-        response_model=RobotRespuesta,
-        status_code=status.HTTP_200_OK, 
-        tags=["Robots"]
-        )
-async def stop_patrol(robot_id: str,current_user: Usuario = Depends(get_current_user), db: Session = Depends(get_db)):
-    """
-    Endpoint to stop the patrol of a specific robot.
-    """
-    robot = db.query(Robot).filter(Robot.id == robot_id).first()
-    if not robot:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Robot not found"
-        )
-    
-    if robot.usuario_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to control this robot"
-        )
-
-    robot.estado_operativo = "idle"
-    db.commit()
-    db.refresh(robot)
-    return robot
 
 #ROBOT --> SERVER (TELEMETRY)
-# THIS IS DONE BY KAFKA, BUT I LEAVE IT HERE AS AN EXAMPLE ENDPOINT FOR REAL-TIME TELEMETRY
-@app.put("/robot/{robot_id}/serve-telemetry", tags=["Robots"])
-async def serve_telemetry(robot_id: str):
+def serve_telemetry(consumer: Consumer):
     """
     Endpoint to serve real-time telemetry from a specific robot and upload it to influxdb.
+    Expected JSON payload example:
+    {
+        "robot_id": "RBT-01",
+        "bateria": 85.5,
+        "velocidad": 0.4,
+        "pos_x": 1.25,
+        "pos_y": 3.42
     """
-    return {"status": "telemetry_serving", "robot_id": robot_id}
 
+    #=============================================================
+    # Create InfluxDB client
+    influx_client = InfluxDBClient(
+        url=settings.influxdb_url,
+        token=settings.influxdb_token,
+        org=settings.influxdb_org
+    )
+
+    write_api = influx_client.write_api(write_options=SYNCHRONOUS)
+
+    #=============================================================
+
+    try:
+        while True:
+            msg = consumer.poll(1.0)
+
+            if msg is None:
+                continue
+            if msg.error():
+                if msg.error().code() == KafkaError._PARTITION_EOF:
+                    continue
+                else:
+                    print(f"Consumer Error (telemetry): {msg.error()}")
+                    continue
+            
+
+            #==============================================================
+            # Security check: Verify the token in the message headers to ensure it's from an authenticated robot
+
+            headers = msg.headers()
+            if not headers:
+                print("MESSAGE DISCARDED: No headers found in Kafka message")
+                continue
+
+            headers_dict = {h[0]: h[1].decode('utf-8') if h[1] else None for h in headers}
+            token_header = headers_dict.get("Authorization")
+
+            if not token_header or not token_header.startswith("Bearer "):
+                print("MESSAGE DISCARDED: Missing or invalid Authorization header in Kafka message")
+                continue
+
+            try:
+                token_header = token_header.replace("Bearer ", "")
+                robot_id_from_token = verificar_token(token_header)
+            except Exception as e:
+                print(f"Error verifying robot token: {e}")
+                continue
+
+            #==============================================================
+
+            # Process the telemetry message
+            try:
+                telemetry_payload = json.loads(msg.value().decode('utf-8'))
+            except json.JSONDecodeError:
+                print("Error decoding JSON from Kafka message")
+                continue
+
+            robot_id = telemetry_payload.get("robot_id")
+            
+            if not robot_id:
+                print("Invalid telemetry data received, missing robot_id")
+                continue
+            
+            if robot_id != robot_id_from_token:
+                print(f"Robot ID in message ({robot_id}) does not match robot ID from token ({robot_id_from_token}), discarding message")
+                continue
+
+            #==============================================================
+            # Create a point for InfluxDB
+            try:
+                point = Point("robot_telemetry") \
+                    .tag("robot_id", robot_id) \
+                    .field("bateria", float(telemetry_payload.get("bateria", 0.0))) \
+                    .field("velocidad", float(telemetry_payload.get("velocidad", 0.0))) \
+                    .field("pos_x", float(telemetry_payload.get("pos_x", 0.0))) \
+                    .field("pos_y", float(telemetry_payload.get("pos_y", 0.0)))
+                
+                write_api.write(bucket=settings.influxdb_bucket, org=settings.influxdb_org, record=point)
+
+            except Exception as e:
+                print(f"Error writing telemetry to InfluxDB: {e}")
+
+    except Exception as e:
+        print(f"Fatal Error in Kafka consumer loop (telemetry): {e}")
+    
+    finally:
+        write_api.close()
+        influx_client.close()
+        consumer.close()
 
 #ROBOT --> SERVER (INCIDENT DETECTION)
-# THIS IS DONE BY KAFKA, BUT I LEAVE IT HERE AS AN EXAMPLE ENDPOINT TO DETECT INCIDENTS IN REAL TIME
-@app.put("/robot/{robot_id}/detect-incident", tags=["Robots"])
-async def detect_incident(robot_id: str):
+def detect_incident(consumer: Consumer):
     """
     Endpoint to detect real-time incidents through the robot's camera.
+
+    Incidents come with this JSON structure:
+    {
+        "robot_id": "string",
+        "video_url": "string"
+    }
+
+    and this function creates an incident in the database with the received data. id, robot_id, video_url, revisado (default False), created_at (timestamp)
+
+     The robot sends the video to MinIO and then sends the URL to this endpoint.
+     The server receives the URL and creates an incident in the database, which will be visible in the user's app.
+     This endpoint is called by Kafka when a new message arrives in the 'incidents' topic.
+     The Kafka consumer listens to the topic and calls this function for each new message.
+     The function processes the message, extracts the data, and creates a new incident in the database.
+     This way, we can handle incidents in real time without needing the robot to call an HTTP endpoint directly.
     """
-    return {"status": "incident_detection_active", "robot_id": robot_id}
 
-#USER --> SERVER
-@app.get("/robot/{robot_id}/incidents",
-        response_model=list[IncidenteRespuesta],
-        status_code=status.HTTP_200_OK,
-        tags=["Robots"]
-        )
-async def list_incidents(robot_id: str,current_user: Usuario = Depends(get_current_user), db: Session = Depends(get_db)):
-    """
-    Endpoint to list all incidents associated with a specific robot.
-    """
+    try:
+        while True:
+            msg = consumer.poll(1.0)
 
-    robot = db.query(Robot).filter(Robot.id == robot_id).first()
+            if msg is None:
+                continue
+            if msg.error():
+                if msg.error().code() == KafkaError._PARTITION_EOF:
+                    continue  # Fin de la partición, sigue esperando
+                else:
+                    print(f"Consumer Error (incident): {msg.error()}")
+                    continue
+            
+            #==============================================================
 
-    if not robot:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Robot not found"
-        )
-    
-    if robot.usuario_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to view incidents for this robot"
-        )
-    
-    Incidentes = db.query(Incidente).filter(Incidente.robot_id == robot_id).all()
+            headers = msg.headers()
+            if not headers:
+                print("MESSAGE DISCARDED: No headers found in Kafka message")
+                continue
 
-    return Incidentes
+            headers_dict = {h[0]: h[1].decode('utf-8') if h[1] else None for h in headers}
+            token_header = headers_dict.get("Authorization")
+
+            if not token_header or not token_header.startswith("Bearer "):
+                print("MESSAGE DISCARDED: Missing or invalid Authorization header in Kafka message")
+                continue
+            
+            token_header = token_header.replace("Bearer ", "")
+
+            try:
+                robot_token = verificar_token(token_header)
+            except Exception as e:
+                print(f"Error verifying robot token: {e}")
+                continue
+
+            #==============================================================
+
+            # Procesar el mensaje recibido
+            try:
+                incident_payload = json.loads(msg.value().decode('utf-8'))
+            except json.JSONDecodeError:
+                print("Error decoding JSON from Kafka message")
+                continue
+
+            robot_id = incident_payload.get("robot_id")
+            video_url = incident_payload.get("video_url")
+
+            if not robot_id or not video_url:
+                print("Invalid incident data received, missing robot_id or video_url")
+                continue
+            
+            #this is a security check to ensure that the robot_id in the message matches the robot_id from the token, preventing spoofing
+            if robot_id != robot_token:
+                print(f"Robot ID in message ({robot_id}) does not match robot ID from token ({robot_token}), discarding message") #
+                continue
+
+            #==============================================================
+
+
+            db: Session = SessionLocal()
+            try:
+                new_incident = Incidente(
+                    robot_id=robot_id,
+                    video_url=video_url,
+                    revisado=False
+                )
+                db.add(new_incident)
+                db.commit()
+            
+            except Exception as e:
+                db.rollback()
+                print(f"Error saving incident to database: {e}")
+
+            finally:
+                db.close()
+
+            #HERE WE CAN ADD LOGIC TO WARN THE USER IN REAL TIME THROUGH WEBSOCKETS OR PUSH NOTIFICATIONS
+
+    except Exception as e:
+        print(f"Fatal Error in Kafka consumer loop (incidents): {e}")
+
+    finally:
+        consumer.close()
 
 #ROBOT --> SERVER (FIRST BOOT TO GENERATE SECRET) TOFU
 @app.post(
@@ -261,7 +395,10 @@ async def robot_auth(robot_id: str, auth: RobotAuthParams, db: Session = Depends
 
     return RobotJWTRespuesta(access_token=token)
 
+
+#============================
 # 5. USER ENDPOINTS
+#============================
 
 @app.post(
     "/user/register", 
@@ -327,7 +464,7 @@ async def login_user(credentials: UsuarioLogin, db: Session = Depends(get_db)):
         )
     
     # Generate a JWT token for the user
-    token = generate_jwt_token(usuario.id)
+    token = generate_jwt_token(str(usuario.id))
 
     return UsuarioJWTRespuesta(
         access_token=token,
@@ -397,7 +534,7 @@ async def list_robots(current_user: Usuario = Depends(get_current_user), db: Ses
     return user_robots
 
 @app.delete(
-            "/user/robot/{robot_id}/delete",
+            "/user/{robot_id}/delete",
             response_model=robotRespuestaDelete,
             status_code=status.HTTP_200_OK,
             tags=["Robots"]
@@ -419,6 +556,66 @@ async def delete_robot(robot_id: str, current_user: Usuario = Depends(get_curren
     
     return robotRespuestaDelete(robot_id=robot_id)  # Devuelve el ID del robot eliminado para que Flutter pueda actualizar su UI
 
+#USER --> SERVER --> ROBOT
+@app.put(
+        "/user/{robot_id}/start-patrol",
+        response_model=RobotRespuesta,
+        status_code=status.HTTP_200_OK,
+        tags=["Robots"]
+        )
+async def start_patrol(robot_id: str, current_user: Usuario = Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    Endpoint to start the patrol of a specific robot.
+    """
+
+    robot = db.query(Robot).filter(Robot.id == robot_id).first()
+    if not robot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Robot not found"
+        )
+    
+    if robot.usuario_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to control this robot"
+        )
+
+    robot.estado_operativo = "patrolling"
+    db.commit()
+    db.refresh(robot)
+
+    return robot
+
+#USER --> SERVER --> ROBOT
+@app.put(
+        "/user/{robot_id}/stop-patrol",
+        response_model=RobotRespuesta,
+        status_code=status.HTTP_200_OK, 
+        tags=["Robots"]
+        )
+async def stop_patrol(robot_id: str, current_user: Usuario = Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    Endpoint to stop the patrol of a specific robot.
+    """
+    robot = db.query(Robot).filter(Robot.id == robot_id).first()
+    if not robot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Robot not found"
+        )
+    
+    if robot.usuario_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to control this robot"
+        )
+
+    robot.estado_operativo = "idle"
+    db.commit()
+    db.refresh(robot)
+    return robot
+
 @app.get(
         "/user/incidents",
         response_model=list[IncidenteRespuesta],
@@ -433,6 +630,37 @@ async def list_user_incidents(current_user: Usuario = Depends(get_current_user),
     total_incidents = db.query(Incidente).join(Robot).filter(Robot.usuario_id == current_user.id).all()    
 
     return total_incidents
+
+#USER --> SERVER
+@app.get(
+        "/user/{robot_id}/incidents",
+        response_model=list[IncidenteRespuesta],
+        status_code=status.HTTP_200_OK,
+        tags=["Robots"]
+        )
+async def list_robot_incidents(robot_id: str,current_user: Usuario = Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    Endpoint to list all incidents associated with a specific robot.
+    """
+
+    robot = db.query(Robot).filter(Robot.id == robot_id).first()
+
+    if not robot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Robot not found"
+        )
+    
+    if robot.usuario_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to view incidents for this robot"
+        )
+    
+    incidentes = db.query(Incidente).filter(Incidente.robot_id == robot_id).all()
+
+    return incidentes
+
 
 @app.put(
         "/user/update-password",
@@ -472,7 +700,6 @@ async def update_password(
     
     return current_user
 
-
 @app.put(
         "/user/update-info",
         response_model=UsuarioRespuesta,
@@ -510,3 +737,165 @@ async def update_user_info(
     db.commit()
     db.refresh(current_user)
     return current_user
+
+
+#================================
+# ADMIN ENDPOINTS
+#================================
+
+@app.get(
+        "/admin/robots",
+        response_model=list[RobotRespuesta],
+        status_code=status.HTTP_200_OK,
+        tags=["Admin"]
+        )
+async def admin_list_robots(current_admin: Usuario = Depends(get_current_admin), db: Session = Depends(get_db)):
+    """
+    Admin endpoint to list all robots in the system.
+    """
+    robots = db.query(Robot).all()
+    return robots
+
+@app.get(
+        "/admin/robots/{robot_id}/incidents",
+        response_model=list[IncidenteRespuesta],
+        status_code=status.HTTP_200_OK,
+        tags=["Admin"]
+        )
+async def admin_list_robot_incidents(
+    robot_id: str,
+    current_admin: Usuario = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Admin endpoint to list all incidents for a specific robot.
+    """
+    incidents = db.query(Incidente).filter(Incidente.robot_id == robot_id).all()
+    return incidents
+
+@app.get(
+        "/admin/users",
+        response_model=list[UsuarioRespuesta],
+        status_code=status.HTTP_200_OK,
+        tags=["Admin"])
+async def admin_list_users(current_admin: Usuario = Depends(get_current_admin), db: Session = Depends(get_db)):
+    """
+    Admin endpoint to list all users in the system.
+    """
+    users = db.query(Usuario).all()
+    return users
+
+@app.delete(
+        "/admin/users/{user_id}/delete",
+        status_code=status.HTTP_200_OK,
+        tags=["Admin"]
+)
+async def admin_delete_user(
+    user_id: int, 
+    current_admin: Usuario = Depends(get_current_admin), 
+    db: Session = Depends(get_db)
+):
+    """
+    Endpoint para borrar un usuario del sistema por completo.
+    (Esto borrará también sus robots e incidentes en cascada).
+    """
+    user = db.query(Usuario).filter(Usuario.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado")
+    
+    # Protección: Un admin no puede suicidarse digitalmente
+    if user.id == current_admin.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No puedes borrar tu propia cuenta de administrador")
+
+    db.delete(user)
+    db.commit()
+    return {"status": "user_deleted", "user_id": user_id}
+
+@app.delete(
+        "/admin/robots/{robot_id}/delete",
+        status_code=status.HTTP_200_OK,
+        tags=["Admin"]
+)
+async def admin_delete_robot(
+    robot_id: str, 
+    current_admin: Usuario = Depends(get_current_admin), 
+    db: Session = Depends(get_db)
+):
+    """
+    Endpoint para que el Admin borre cualquier robot (sin importar de quién sea).
+    """
+    robot = db.query(Robot).filter(Robot.id == robot_id).first()
+    if not robot:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Robot no encontrado")
+
+    db.delete(robot)
+    db.commit()
+    return {"status": "robot_deleted", "robot_id": robot_id}
+
+@app.put(
+        "/admin/users/{user_id}/grant",
+        response_model=UsuarioRespuesta,
+        status_code=status.HTTP_200_OK,
+        tags=["Admin"]
+)
+async def admin_grant_permissions(
+    user_id: int, 
+    current_admin: Usuario = Depends(get_current_admin), 
+    db: Session = Depends(get_db)
+):
+    """
+    Ascender a un usuario normal al rango de Administrador.
+    """
+    user = db.query(Usuario).filter(Usuario.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado")
+
+    if user.rol == "admin":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El usuario ya es administrador")
+
+    user.rol = "admin"
+    db.commit()
+    db.refresh(user)
+    
+    return user
+
+@app.put(
+        "/admin/users/{user_id}/revoke",
+        response_model=UsuarioRespuesta,
+        status_code=status.HTTP_200_OK,
+        tags=["Admin"]
+)
+async def admin_revoke_permissions(
+    user_id: int, 
+    current_admin: Usuario = Depends(get_current_admin), 
+    db: Session = Depends(get_db)
+):
+    """
+    Degradar a un Administrador al rango de usuario normal.
+    """
+    user = db.query(Usuario).filter(Usuario.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado")
+
+    if user.id == current_admin.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No puedes revocar tus propios permisos de administrador")
+
+    if user.rol == "user":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El usuario ya tiene el rol base")
+
+    user.rol = "user"
+    db.commit()
+    db.refresh(user)
+    
+    return user
+
+
+if __name__ == "__main__":
+    print("Levantando consumidores de Kafka en segundo plano...")
+    incident_consumer, telemetry_consumer = create_server_consumers()
+    
+    threading.Thread(target=detect_incident, args=(incident_consumer,), daemon=True).start()
+    threading.Thread(target=serve_telemetry, args=(telemetry_consumer,), daemon=True).start()
+    
+    print("🌐 Arrancando servidor FastAPI...")
+    uvicorn.run(app, host="0.0.0.0", port=8000) 

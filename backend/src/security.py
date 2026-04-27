@@ -1,4 +1,4 @@
-from http.client import HTTPException, status
+from fastapi import HTTPException, status
 
 from passlib.context import CryptContext
 import secrets

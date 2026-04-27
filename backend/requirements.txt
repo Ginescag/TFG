@@ -19,10 +19,12 @@ boto3                     # SDK de AWS para interactuar con MinIO (vídeos/fotos
 # --- Seguridad y Autenticación ---
 pyjwt                     # Generación y verificación de tokens JWT para autenticación
 passlib[bcrypt]           # Cifrado seguro de contraseñas de usuarios
+bcrypt<4.0.0              # Versión máxima de bcrypt compatible con passlib
 python-multipart          # Soporte para subida de archivos y formularios en FastAPI
 
 # --- Utilidades y Configuración ---
 pydantic                  # Validación de datos y tipos de datos (Esquemas)
 pydantic-settings         # Gestión de configuraciones mediante variables de entorno (.env)
+pydantic[email]
 httpx                     # Cliente HTTP asíncrono (útil para webhooks o llamadas externas)
 uuid                      # Generación de identificadores únicos

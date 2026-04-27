@@ -17,7 +17,6 @@ def get_current_user(
     db: Session = Depends(get_db)
 ) -> Usuario:
     """
-    Portero para Humanos (Flutter).
     Verifica que el token sea válido y pertenezca a un Usuario registrado.
     """
     token = credentials.credentials
@@ -41,7 +40,6 @@ def get_current_robot(
     db: Session = Depends(get_db)
 ) -> Robot:
     """
-    Portero para Robots (TurtleBot).
     Verifica que el token sea válido y pertenezca a un Robot registrado.
     """
     token = credentials.credentials
@@ -58,3 +56,16 @@ def get_current_robot(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Robot no encontrado en la base de datos")
         
     return robot
+
+
+def get_current_admin(current_user: Usuario = Depends(get_current_user)) -> Usuario:
+    """
+    Primero pasa por get_current_user para verificar el token.
+    Luego comprueba si el rol es de administrador.
+    """
+    if current_user.rol != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acceso denegado. Se requieren privilegios de administrador."
+        )
+    return current_user

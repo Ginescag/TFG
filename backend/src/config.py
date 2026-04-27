@@ -17,6 +17,8 @@ class Settings(BaseSettings):
 
     # --- 3. Mensajería (Kafka) ---
     kafka_broker_url: str
+    kafka_incident_topic: str
+    kafka_telemetry_topic: str
 
     # --- 4. Almacenamiento (MinIO) ---
     minio_endpoint: str
