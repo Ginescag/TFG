@@ -1,33 +1,41 @@
 # imagen oficial de ROS 2 Humble
 FROM osrf/ros:humble-desktop
 
-# Configuramos la terminal
 SHELL ["/bin/bash", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
 
-# 1 Herramientas básicas de compilación y Python
+# 1. Herramientas básicas
 RUN apt-get update && apt-get install -y \
     python3-pip \
     python3-colcon-common-extensions \
     nano \
     git \
     iputils-ping \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
-# 2 Paquetes oficiales del TurtleBot 4 y su simulador
+# 2. Paquetes TurtleBot 4 + TurtleBot 3 + Gazebo
 RUN apt-get update && apt-get install -y \
     ros-humble-turtlebot4-simulator \
     ros-humble-turtlebot4-desktop \
-    ros-humble-turtlebot4-navigation2 \
+    ros-humble-turtlesim \
+    ros-humble-turtlebot4-navigation \
     ros-humble-turtlebot4-viz \
+    ros-humble-turtlebot3 \
+    ros-humble-turtlebot3-simulations \
+    ros-humble-turtlebot3-gazebo \
+    ros-humble-gazebo-ros-pkgs \
+    qtwayland5 \
     && rm -rf /var/lib/apt/lists/*
 
-# 3. Librerías de Python para tu Bridge (FastAPI + Kafka)
-RUN pip3 install confluent-kafka requests --break-system-packages
+# 3. Librerías Python
+RUN pip3 install confluent-kafka requests
 
-# 4. Preparar el Workspace
+# 4. Workspace
 WORKDIR /robot_ws
 RUN mkdir -p src
 
-# 5. Automatizar los sources para que los comandos de ROS 2 funcionen al abrir la terminal
+# 5. Source automático
 RUN echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
+RUN echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc && \
+    echo "export TURTLEBOT3_MODEL=burger" >> ~/.bashrc
