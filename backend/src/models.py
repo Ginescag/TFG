@@ -63,7 +63,8 @@ class Incidente(Base):
     robot_id = Column(String(50), ForeignKey("robots.id", ondelete="CASCADE"))
     
     # Data fields
-    video_url = Column(String(500))
+    bucket_name = Column(String(100), nullable=True)
+    video_filename = Column(String(255), nullable=True)
     revisado = Column(Boolean, default=False)
     
     # Timestamps

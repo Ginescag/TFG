@@ -226,13 +226,14 @@ def detect_incident(consumer: Consumer):
     Incidents come with this JSON structure:
     {
         "robot_id": "string",
-        "video_url": "string"
+        "bucket_name": "string",
+        "video_filename": "string"
     }
 
-    and this function creates an incident in the database with the received data. id, robot_id, video_url, revisado (default False), created_at (timestamp)
+    and this function creates an incident in the database with the received data. id, robot_id, bucket_name, video_filename, revisado (default False), created_at (timestamp)
 
-     The robot sends the video to MinIO and then sends the URL to this endpoint.
-     The server receives the URL and creates an incident in the database, which will be visible in the user's app.
+     The robot sends the video to MinIO and then sends the bucket and object key to this endpoint.
+     The server receives the bucket and object key and creates an incident in the database, which will be visible in the user's app.
      This endpoint is called by Kafka when a new message arrives in the 'incidents' topic.
      The Kafka consumer listens to the topic and calls this function for each new message.
      The function processes the message, extracts the data, and creates a new incident in the database.
@@ -284,10 +285,11 @@ def detect_incident(consumer: Consumer):
                 continue
 
             robot_id = incident_payload.get("robot_id")
-            video_url = incident_payload.get("video_url")
+            bucket_name = incident_payload.get("bucket_name")
+            video_filename = incident_payload.get("video_filename")
 
-            if not robot_id or not video_url:
-                print("Invalid incident data received, missing robot_id or video_url")
+            if not robot_id or not bucket_name or not video_filename:
+                print("Invalid incident data received, missing required fields")
                 continue
             
             #this is a security check to ensure that the robot_id in the message matches the robot_id from the token, preventing spoofing
@@ -302,7 +304,8 @@ def detect_incident(consumer: Consumer):
             try:
                 new_incident = Incidente(
                     robot_id=robot_id,
-                    video_url=video_url,
+                    bucket_name=bucket_name,
+                    video_filename=video_filename,
                     revisado=False
                 )
                 db.add(new_incident)

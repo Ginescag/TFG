@@ -1,5 +1,6 @@
 import sys
 import os
+from time import time
 from uuid import uuid4
 
 # Añadimos la carpeta actual al path para que Python encuentre el módulo 'src'
@@ -87,13 +88,15 @@ def seed():
             inc1 = Incidente(
                 id=uuid4(),
                 robot_id=rbt1_id,
-                video_url="http://localhost:9000/tfg-incidents/video1.mp4",
+                bucket_name=os.getenv("MINIO_BUCKET_NAME"),
+                video_filename=f'incident_{int(time.time())}_RBT-01.mp4',
                 revisado=False
             )
             inc2 = Incidente(
                 id=uuid4(),
                 robot_id=rbt1_id,
-                video_url="http://localhost:9000/tfg-incidents/video2.mp4",
+                bucket_name=os.getenv("MINIO_BUCKET_NAME"),
+                video_filename=f'incident_{int(time.time())}_RBT-01_2.mp4',
                 revisado=True
             )
             db.add_all([inc1, inc2])

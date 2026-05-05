@@ -102,7 +102,8 @@ class IncidenteRespuesta(BaseModel):
     """Data returned when Flutter asks for the incident list"""
     id: UUID
     robot_id: str
-    video_url: Optional[str]
+    bucket_name: Optional[str]
+    video_filename: Optional[str]
     revisado: bool
     created_at: datetime
 

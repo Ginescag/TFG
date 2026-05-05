@@ -31,7 +31,8 @@ CREATE TABLE incidentes (
     robot_id VARCHAR(50) REFERENCES robots(id) ON DELETE CASCADE,
     --tipo_incidencia VARCHAR(50) NOT NULL,          
     --nivel_confianza DECIMAL(4,3) NOT NULL,         
-    video_url VARCHAR(500),                        
+    bucket_name VARCHAR(100) NOT NULL,
+    file_name VARCHAR(255) NOT NULL,                        
     revisado BOOLEAN DEFAULT FALSE,                                           
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
