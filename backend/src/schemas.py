@@ -109,3 +109,7 @@ class IncidenteRespuesta(BaseModel):
 
     class Config:
         from_attributes = True
+
+class IncidenteURLRespuesta(BaseModel):
+    """Data returned when Flutter requests the video URL for an incident"""
+    video_url: Optional[str] = None

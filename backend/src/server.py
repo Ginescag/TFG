@@ -1,6 +1,7 @@
 
 import json
 import threading
+from uuid import UUID
 import uvicorn
 
 from fastapi import FastAPI, Depends, HTTPException, status
@@ -9,12 +10,13 @@ from sqlalchemy.orm import Session
 from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.write_api import SYNCHRONOUS
 from confluent_kafka import Consumer, KafkaError
+import boto3
 
 from src.dependencies import get_current_admin, get_current_user, get_current_robot
 from src.config import settings
 from src.database import SessionLocal, get_db
 from src.models import Usuario, Robot, Incidente
-from src.schemas import IncidenteRespuesta, RobotAuthParams, RobotHeartbeat, RobotJWTRespuesta, UsuarioActualizar, UsuarioActualizarPassword, UsuarioBase, UsuarioJWTRespuesta, UsuarioLogin, UsuarioRegistro, UsuarioRespuesta, RobotAlta, RobotRespuesta, RobotFirstBootRespuesta, robotRespuestaDelete
+from src.schemas import IncidenteRespuesta, IncidenteURLRespuesta, RobotAuthParams, RobotHeartbeat, RobotJWTRespuesta, UsuarioActualizar, UsuarioActualizarPassword, UsuarioBase, UsuarioJWTRespuesta, UsuarioLogin, UsuarioRegistro, UsuarioRespuesta, RobotAlta, RobotRespuesta, RobotFirstBootRespuesta, robotRespuestaDelete
 from src.security import get_password_hash, verificar_token, verify_password, generar_secreto_robot, generate_jwt_token
 
 # 1. Initialize the FastAPI application
@@ -664,6 +666,58 @@ async def list_robot_incidents(robot_id: str,current_user: Usuario = Depends(get
 
     return incidentes
 
+@app.get(
+        "/user/incidents/{incident_id}/show-video",
+        response_model=IncidenteURLRespuesta,
+        status_code=status.HTTP_200_OK,
+        tags=["Users"]
+)
+async def get_incident_video(id: UUID, current_user: Usuario = Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    Endpoint to get the video URL of a specific incident.
+    """
+
+    incident = db.query(Incidente).join(Robot).filter(Incidente.id == id, Robot.usuario_id == current_user.id).first()
+
+    if not incident:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Incident not found or you do not have permission to view it"
+        )
+    
+    if not incident.bucket_name or not incident.video_filename:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video information for this incident is incomplete"
+        )
+    
+    # Generate a presigned URL for the video in MinIO with boto3
+
+    try:
+        s3_client = boto3.client(
+            's3',
+            endpoint_url=settings.minio_endpoint,
+            aws_access_key_id=settings.minio_access_key,
+            aws_secret_access_key=settings.minio_secret_key
+        )
+
+        video_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={
+                'Bucket': incident.bucket_name,
+                'Key': incident.video_filename
+                },
+            ExpiresIn=3600  # URL expires in 1 hour
+        )
+    except Exception as e:
+        print(f"Error generating presigned URL for incident video: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not generate video URL"
+        )
+
+    return IncidenteURLRespuesta(video_url=video_url)
+
 
 @app.put(
         "/user/update-password",
@@ -741,7 +795,6 @@ async def update_user_info(
     db.refresh(current_user)
     return current_user
 
-
 #================================
 # ADMIN ENDPOINTS
 #================================
@@ -751,7 +804,7 @@ async def update_user_info(
         response_model=list[RobotRespuesta],
         status_code=status.HTTP_200_OK,
         tags=["Admin"]
-        )
+)
 async def admin_list_robots(current_admin: Usuario = Depends(get_current_admin), db: Session = Depends(get_db)):
     """
     Admin endpoint to list all robots in the system.
