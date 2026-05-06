@@ -1,4 +1,5 @@
 
+import datetime
 import json
 import threading
 from uuid import UUID
@@ -188,6 +189,8 @@ def serve_telemetry(consumer: Consumer):
                 continue
 
             robot_id = telemetry_payload.get("robot_id")
+            robot_timestamp = telemetry_payload.get("timestamp")
+            time_obj = datetime.datetime.fromtimestamp(robot_timestamp, tz=datetime.timezone.utc)
             
             if not robot_id:
                 print("Invalid telemetry data received, missing robot_id")
@@ -202,10 +205,17 @@ def serve_telemetry(consumer: Consumer):
             try:
                 point = Point("robot_telemetry") \
                     .tag("robot_id", robot_id) \
-                    .field("bateria", float(telemetry_payload.get("bateria", 0.0))) \
-                    .field("velocidad", float(telemetry_payload.get("velocidad", 0.0))) \
-                    .field("pos_x", float(telemetry_payload.get("pos_x", 0.0))) \
-                    .field("pos_y", float(telemetry_payload.get("pos_y", 0.0)))
+                    .field("bateria", telemetry_payload.get("bateria", 0.0)) \
+                    .field("bateria_voltaje", telemetry_payload.get("bateria_voltaje", 0.0)) \
+                    .field("is_docked", telemetry_payload.get("is_docked", False)) \
+                    .field("pos_x", telemetry_payload.get("pos_x", 0.0)) \
+                    .field("pos_y", telemetry_payload.get("pos_y", 0.0)) \
+                    .field("vel_linear", telemetry_payload.get("vel_linear", 0.0)) \
+                    .field("vel_angular", telemetry_payload.get("vel_angular", 0.0)) \
+                    .field("is_kidnapped", telemetry_payload.get("is_kidnapped", False)) \
+                    .field("is_slipping", telemetry_payload.get("is_slipping", False)) \
+                    .field("wheels_enabled", telemetry_payload.get("wheels_enabled", False)) \
+                    .time(time_obj, WritePrecision.NS)
                 
                 write_api.write(bucket=settings.influxdb_bucket, org=settings.influxdb_org, record=point)
 
