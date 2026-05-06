@@ -117,7 +117,6 @@ async def robot_heartbeat(heartbeat: RobotHeartbeat, curr_robot: Robot = Depends
     
     return curr_robot
 
-
 #ROBOT --> SERVER (TELEMETRY)
 def serve_telemetry(consumer: Consumer):
     """
