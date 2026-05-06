@@ -400,7 +400,6 @@ async def robot_auth(robot_id: str, auth: RobotAuthParams, db: Session = Depends
 
     return RobotJWTRespuesta(access_token=token)
 
-
 #============================
 # 5. USER ENDPOINTS
 #============================
@@ -590,6 +589,8 @@ async def start_patrol(robot_id: str, current_user: Usuario = Depends(get_curren
     db.commit()
     db.refresh(robot)
 
+    #logic to notify the robot in real time that it should start patrolling can be added here (kafka)
+
     return robot
 
 #USER --> SERVER --> ROBOT
@@ -619,6 +620,9 @@ async def stop_patrol(robot_id: str, current_user: Usuario = Depends(get_current
     robot.estado_operativo = "idle"
     db.commit()
     db.refresh(robot)
+
+    #logic to notify the robot in real time that it should stop patrolling can be added here (kafka)
+
     return robot
 
 @app.get(

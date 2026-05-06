@@ -149,3 +149,18 @@ class DetectIncidentNode(Node):
                 if self.model.names[cls_id] in target_classes and conf >= confidence_threshold:
                     return True
         return False
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = DetectIncidentNode()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.kafkaProducer.flush()
+        node.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
