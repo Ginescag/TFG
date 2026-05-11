@@ -7,7 +7,7 @@ import threading
 import time
 from pathlib import Path
 
-# Nota: Tendremos que editar package.xml y CMakeLists.txt para que se compile este .srv
+# Nota: Tengo que editar package.xml y CMakeLists.txt para que se compile este .srv
 from secret_helper.srv import GetToken
 
 class SecretHelperNode(Node):
@@ -17,8 +17,7 @@ class SecretHelperNode(Node):
         self.robot_id = os.getenv('ROBOT_ID')
         self.backend_url = os.getenv('BACKEND_URL')
         
-        # Ruta donde guardaremos físicamente el secreto dentro del robot.
-        # Puede ser un volumen de docker para que sea tolerante a reinicios del contenedor
+        # route to store the secret locally (mounted volume from Kubernetes)
         self.secret_file = Path(os.getenv('SECRET_PATH'))
         
         self.current_jwt = None
@@ -27,8 +26,7 @@ class SecretHelperNode(Node):
         # ROS 2 Service Server
         self.srv = self.create_service(GetToken, 'get_robot_token', self.get_token_callback)
         
-        # Iniciamos el proceso de obtención/refresco del token en un Hilo separado
-        # para no bloquear el bucle (spin) de ROS 2 si hay problemas de red.
+        #thread to sleep and refresh the token every hour
         threading.Thread(target=self.auth_routine, daemon=True).start()
 
     def auth_routine(self):
@@ -89,7 +87,6 @@ class SecretHelperNode(Node):
         return None
 
     def authenticate(self, secret):
-        """Llama al backend con el secreto raíz para obtener el JWT temporal de sesión."""
         self.get_logger().info("Contactando al backend para obtener JWT...")
         try:
             url = f"{self.backend_url}/robot/{self.robot_id}/auth"
