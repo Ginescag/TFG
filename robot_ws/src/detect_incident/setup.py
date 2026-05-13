@@ -24,7 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'detect_incident_node = detect_incident.detect_incident_node:main',
+            'detect_incident_node = detect_incident.detect_incident:main',
         ],
     },
 )

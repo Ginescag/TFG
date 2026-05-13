@@ -24,6 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'secret_helper_node = secret_helper.secret_helper:main'
         ],
     },
 )

@@ -24,7 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'serve_telemetry_node = serve_telemetry.serve_telemetry_node:main',
+            'serve_telemetry_node = serve_telemetry.serve_telemetry:main',
         ],
     },
 )
