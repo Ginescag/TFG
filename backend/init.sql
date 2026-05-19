@@ -32,7 +32,7 @@ CREATE TABLE incidentes (
     --tipo_incidencia VARCHAR(50) NOT NULL,          
     --nivel_confianza DECIMAL(4,3) NOT NULL,         
     bucket_name VARCHAR(100) NOT NULL,
-    file_name VARCHAR(255) NOT NULL,                        
+    video_filename VARCHAR(255) NOT NULL,                        
     revisado BOOLEAN DEFAULT FALSE,                                           
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );

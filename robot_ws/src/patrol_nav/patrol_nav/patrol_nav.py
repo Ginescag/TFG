@@ -1,12 +1,16 @@
+import json
 import math
 import os
 import subprocess
 from collections import deque
 
+import httpx
+
 import cv2
 import numpy as np
 import rclpy
 import yaml
+from confluent_kafka import Consumer, KafkaError, KafkaException
 from geometry_msgs.msg import PoseStamped
 from nav2_msgs.srv import SaveMap
 from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
@@ -25,6 +29,12 @@ class PatrolOrchestrator(Node):
         self.declare_parameter('dock_x', 0.0)
         self.declare_parameter('dock_y', 0.0)
         self.declare_parameter('dock_yaw', 0.0)
+        self.declare_parameter('robot_id', os.getenv('ROBOT_ID', ''))
+        self.declare_parameter('kafka_broker_url', os.getenv('KAFKA_BROKER_URL', ''))
+        self.declare_parameter('kafka_robot_commands_topic', os.getenv('KAFKA_ROBOT_COMMANDS_TOPIC', 'robot_commands'))
+        self.declare_parameter('server_url', os.getenv('SERVER_URL', ''))
+        self.declare_parameter('robot_jwt', os.getenv('ROBOT_JWT', ''))
+        self.declare_parameter('heartbeat_interval_secs', 10.0)
 
         self.map_filepath = self.get_parameter('map_filepath').value
         self.grid_spacing_m = float(self.get_parameter('grid_spacing_m').value)
@@ -35,6 +45,12 @@ class PatrolOrchestrator(Node):
             float(self.get_parameter('dock_y').value),
             float(self.get_parameter('dock_yaw').value)
         )
+        self.robot_id = str(self.get_parameter('robot_id').value).strip()
+        self.kafka_broker_url = str(self.get_parameter('kafka_broker_url').value).strip()
+        self.kafka_robot_commands_topic = str(self.get_parameter('kafka_robot_commands_topic').value).strip()
+        self.server_url = str(self.get_parameter('server_url').value).strip().rstrip('/')
+        self.robot_jwt = str(self.get_parameter('robot_jwt').value).strip()
+        self.heartbeat_interval_secs = float(self.get_parameter('heartbeat_interval_secs').value)
 
         self.state = 'EXPLORING'
         self.waypoints_queue = deque()
@@ -47,11 +63,42 @@ class PatrolOrchestrator(Node):
         self.active_task = None
 
         self.odom_sub = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
+ 
+        # Canonical vocabulary shared with the server.
+        # Each internal FSM state maps to the exact string accepted by the heartbeat.
+        self.FSM_TO_OPERATIVO = {
+            'EXPLORING':      'exploring',
+            'SAVING_MAP':     'saving_map',
+            'PLANNING':       'planning',
+            'PATROLLING':     'patrolling',
+            'PATROL_STOPPED': 'stopped',
+        }
+
+        self.command_consumer = None
+        if not self.robot_id:
+            self.get_logger().error('Robot ID is missing. Set parameter robot_id or env ROBOT_ID.')
+        if self.kafka_broker_url and self.kafka_robot_commands_topic and self.robot_id:
+            self.command_consumer = Consumer({
+                'bootstrap.servers': self.kafka_broker_url,
+                'group.id': f'patrol_command_group_{self.robot_id}',
+                'auto.offset.reset': 'latest'
+            })
+            self.command_consumer.subscribe([self.kafka_robot_commands_topic])
+        else:
+            self.get_logger().error('Kafka command consumer not started due to missing config.')
 
         self.get_logger().info('Waiting for Nav2...')
         self.navigator.waitUntilNav2Active()
 
         self.timer = self.create_timer(1.0, self.state_machine)
+        self.command_timer = self.create_timer(0.5, self.poll_command_topic)
+
+        if self.server_url and self.robot_jwt:
+            self.heartbeat_timer = self.create_timer(self.heartbeat_interval_secs, self.send_heartbeat)
+            self.get_logger().info(f'Heartbeat enabled → {self.server_url} every {self.heartbeat_interval_secs}s')
+        else:
+            self.heartbeat_timer = None
+            self.get_logger().warn('Heartbeat disabled: SERVER_URL or ROBOT_JWT not set. Server DB will not reflect real robot state.')
 
     def create_pose(self, x, y, yaw):
         pose = PoseStamped()
@@ -76,6 +123,37 @@ class PatrolOrchestrator(Node):
             self.last_move_time = now
             self.last_pose = msg.pose.pose.position
 
+    def get_estado_operativo(self) -> str:
+        """
+        Translates the internal FSM state to the string the server expects.
+        """
+        return self.FSM_TO_OPERATIVO.get(self.state, 'idle')
+
+    def send_heartbeat(self):
+        """
+        Calls PUT /robot/heartbeat with the current FSM operational state.
+        It is the source of truth that keeps the server DB synchronized
+        with what the robot is actually doing.
+        """
+        estado = self.get_estado_operativo()
+        try:
+            response = httpx.put(
+                f'{self.server_url}/robot/heartbeat',
+                json={'estado_operativo': estado},
+                headers={'Authorization': f'Bearer {self.robot_jwt}'},
+                timeout=5.0
+            )
+            if response.status_code == 200:
+                self.get_logger().debug(f'Heartbeat OK → estado_operativo={estado}')
+            else:
+                self.get_logger().warn(
+                    f'Heartbeat rejected by server: {response.status_code} {response.text}'
+                )
+        except httpx.TimeoutException:
+            self.get_logger().warn('Heartbeat timeout: server did not respond in 5s')
+        except httpx.RequestError as e:
+            self.get_logger().warn(f'Heartbeat request error: {e}')
+
     def state_machine(self):
         if self.state == 'EXPLORING':
             self.run_exploration()
@@ -90,6 +168,77 @@ class PatrolOrchestrator(Node):
             self.run_patrol_cycle()
         elif self.state == 'PATROL_STOPPED':
             self.run_patrol_stopped()
+
+    def poll_command_topic(self):
+        if self.command_consumer is None:
+            return
+
+        try:
+            msg = self.command_consumer.poll(0.1)
+        except KafkaException as exc:
+            self.get_logger().error(f'Kafka poll error: {exc}')
+            return
+
+        if msg is None:
+            return
+
+        if msg.error():
+            if msg.error().code() != KafkaError._PARTITION_EOF:
+                self.get_logger().warn(f'Kafka message error: {msg.error()}')
+            return
+
+        try:
+            payload = json.loads(msg.value().decode('utf-8'))
+        except (ValueError, UnicodeDecodeError):
+            self.get_logger().warn('Invalid JSON command payload. Ignoring message.')
+            return
+
+        robot_id = payload.get('robot_id')
+        command = payload.get('command')
+
+        if robot_id != self.robot_id:
+            return
+
+        if command == 'start_patrol':
+            self.handle_start_patrol()
+        elif command == 'stop_patrol':
+            self.handle_stop_patrol()
+
+    def handle_start_patrol(self):
+        if self.state == 'PATROL_STOPPED':
+            self.get_logger().info('Received start_patrol. Resuming patrol.')
+            self.active_task = None
+            self.state = 'PATROLLING'
+        elif self.state == 'PATROLLING':
+            # Idempotent: already patrolling, nothing to do.
+            self.get_logger().info('start_patrol received but robot is already PATROLLING. Ignoring.')
+        else:
+            # States EXPLORING / SAVING_MAP / PLANNING: the robot is not yet ready.
+            # The server should have validated this, but we defend here too.
+            self.get_logger().warn(
+                f'start_patrol ignored: robot is in state {self.state} and cannot start patrol yet. '
+                f'Wait until the robot reaches PATROL_STOPPED before issuing start_patrol.'
+            )
+
+    def handle_stop_patrol(self):
+        if self.state != 'PATROL_STOPPED':
+            self.get_logger().info('Received stop_patrol. Returning to dock.')
+            if self.explore_process is not None:
+                self.explore_process.terminate()
+                self.explore_process = None
+            # Bug fix: clear any pending map-save future so it does not remain
+            # orphaned when SAVING_MAP is interrupted mid-flight.
+            if self.save_map_future is not None:
+                self.get_logger().warn('Map save interrupted by stop_patrol. Discarding pending future.')
+                self.save_map_future = None
+            self.state = 'PATROL_STOPPED'
+        else:
+            self.get_logger().info('stop_patrol ignored; already stopped.')
+
+    def destroy_node(self):
+        if self.command_consumer is not None:
+            self.command_consumer.close()
+        super().destroy_node()
 
     # --- PHASE 1: AUTONOMOUS EXPLORATION ---
     def run_exploration(self):
@@ -148,37 +297,37 @@ class PatrolOrchestrator(Node):
             self.get_logger().error("Physical map not found.")
             return
 
-        # 1. Read map parameters
+        # 1. Read map parameters.
         with open(yaml_path, 'r') as f:
             map_data = yaml.safe_load(f)
             resolution = map_data['resolution']
             origin_x = map_data['origin'][0]
             origin_y = map_data['origin'][1]
 
-        # 2. Computer Vision: Find free tiles (white)
+        # 2. Computer Vision: Find free tiles (white).
         img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
         free_space_thresh = 250
         _, binary = cv2.threshold(img, free_space_thresh, 255, cv2.THRESH_BINARY)
         
-        # Erode to separate the robot from the walls
+        # Erode to separate the robot from the walls.
         kernel = np.ones((5,5), np.uint8)
         safe_binary = cv2.erode(binary, kernel, iterations=2)
 
-        # 3. Create a waypoint grid (e.g., a point every 2 meters)
+        # 3. Create a waypoint grid (e.g., a point every 2 meters).
         grid_spacing_pixels = max(1, int(self.grid_spacing_m / resolution))
         
         waypoints = []
         for y in range(0, safe_binary.shape[0], grid_spacing_pixels):
-            # Alternate loop for "snake" or "zig-zag" sweep effect
+            # Alternate loop for a "snake" or "zig-zag" sweep effect.
             x_range = range(0, safe_binary.shape[1], grid_spacing_pixels)
             if (y // grid_spacing_pixels) % 2 != 0:
                 x_range = reversed(x_range)
                 
             for x in x_range:
-                if safe_binary[y, x] == 255: # If space is safe
-                    # Map pixel to real coordinate in meters in ROS 2
+                if safe_binary[y, x] == 255: # If space is safe.
+                    # Map pixel to real coordinate in meters in ROS 2.
                     real_x = origin_x + (x * resolution)
-                    # In ROS, the Y axis is inverted relative to images
+                    # In ROS, the Y axis is inverted relative to images.
                     real_y = origin_y + ((img.shape[0] - y) * resolution)
                     waypoints.append(self.create_pose(real_x, real_y, 0.0))
 
@@ -225,6 +374,13 @@ class PatrolOrchestrator(Node):
             if self.active_task is not None:
                 self.get_logger().info('Patrol stopped by user. Canceling active navigation task.')
                 self.navigator.cancelTask()
+                # Bug fix: Nav2 processes cancellations asynchronously. We must wait
+                # for the current task to actually finish (CANCELED or FAILED) before
+                # issuing goToPose, otherwise the two commands race inside Nav2.
+                # isTaskComplete() returns True once the result (any result) is available.
+                if not self.navigator.isTaskComplete():
+                    self.get_logger().info('Waiting for active task to be canceled before returning to dock...')
+                    return  # Come back next timer tick (1 s) and check again
 
             self.get_logger().info('Returning to dock before stopping patrol.')
             self.navigator.goToPose(self.dock_pose)

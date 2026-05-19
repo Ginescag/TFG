@@ -54,6 +54,7 @@ services:
       echo 'Creando tópicos...'
       kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic ${KAFKA_INCIDENT_TOPIC:-robot_incidents} --replication-factor 1 --partitions 1
       kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic ${KAFKA_TELEMETRY_TOPIC:-robot_telemetry} --replication-factor 1 --partitions 1
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic ${KAFKA_ROBOT_COMMANDS_TOPIC:-robot_commands} --replication-factor 1 --partitions 1
       
       echo 'Tópicos creados con éxito. Me apago.'
       "

@@ -5,12 +5,12 @@ import threading
 from uuid import UUID
 import uvicorn
 
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.write_api import SYNCHRONOUS
-from confluent_kafka import Consumer, KafkaError
+from confluent_kafka import Consumer, Producer, KafkaError
 import boto3
 
 from src.dependencies import get_current_admin, get_current_user, get_current_robot
@@ -60,11 +60,9 @@ async def health_check():
         "influxdb_configured": bool(settings.influxdb_url)
     }
 
-
 #============================
 # 3. KAFKA SETTINGS
 #============================
-
 
 def create_server_consumers():
 
@@ -88,9 +86,39 @@ def create_server_consumers():
     })
 
     telemetry_consumer.subscribe([settings.kafka_telemetry_topic])
-    
-    return incident_consumer, telemetry_consumer
 
+    producer_robot_comms = Producer({
+        'bootstrap.servers': settings.kafka_broker_url
+    })
+    
+    return incident_consumer, telemetry_consumer, producer_robot_comms
+
+@app.on_event("startup")
+async def startup_event():
+    """
+    This function runs when the FastAPI server starts.
+    We can use it to initialize resources, such as Kafka consumers.
+    """
+    print("Iniciando recursos del servidor...")
+
+    incident_consumer, telemetry_consumer, producer_robot_comms = create_server_consumers()
+
+    app.state.producer_robot_comms = producer_robot_comms
+
+    threading.Thread(target=detect_incident, args=(incident_consumer,), daemon=True).start()
+    threading.Thread(target=serve_telemetry, args=(telemetry_consumer,), daemon=True).start()
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """
+    This function runs when the FastAPI server is shutting down.
+    flushes and closes the Kafka producer to ensure all messages are sent before exiting.
+    """
+    producer : Producer = getattr(app.state, "producer_robot_comms", None)
+    if producer:
+        print("Cerrando Kafka producer...")
+        producer.flush()
+        producer.close()
 
 #============================
 # 4. ROBOT ENDPOINTS
@@ -107,15 +135,38 @@ async def robot_heartbeat(heartbeat: RobotHeartbeat, curr_robot: Robot = Depends
     """
     Endpoint de 'Latido' (Heartbeat).
     El robot llama a esta ruta cada X segundos para avisar al servidor de que sigue online.
+    El campo estado_operativo es la fuente de verdad del estado real del robot:
+    el servidor actualiza la DB con el valor que manda el robot, no al revés.
     """
-        
-    curr_robot.estado_conexion = "online" 
+
+    # Vocabulario canónico de estados operativos.
+    # Debe coincidir exactamente con los strings que emite patrol_nav.py.
+    VALID_OPERATIONAL_STATES = {
+        "idle",        # Robot registrado pero sin mapa / recién arrancado
+        "exploring",   # FSM: EXPLORING
+        "saving_map",  # FSM: SAVING_MAP
+        "planning",    # FSM: PLANNING
+        "patrolling",  # FSM: PATROLLING
+        "stopped",     # FSM: PATROL_STOPPED (en dock, patrulla detenida por el usuario)
+    }
+
+    curr_robot.estado_conexion = "online"
     if heartbeat.estado_operativo is not None:
+        if heartbeat.estado_operativo not in VALID_OPERATIONAL_STATES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Invalid estado_operativo '{heartbeat.estado_operativo}'. "
+                    f"Allowed values: {sorted(VALID_OPERATIONAL_STATES)}"
+                )
+            )
         curr_robot.estado_operativo = heartbeat.estado_operativo
+
     db.commit()
     db.refresh(curr_robot)
-    
+
     return curr_robot
+
 
 #ROBOT --> SERVER (TELEMETRY)
 def serve_telemetry(consumer: Consumer):
@@ -593,12 +644,50 @@ async def start_patrol(robot_id: str, current_user: Usuario = Depends(get_curren
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have permission to control this robot"
         )
+    
 
-    robot.estado_operativo = "patrolling"
-    db.commit()
-    db.refresh(robot)
+    #ROBOT CAN ONLY START PATROLLING IF IT IS IN:
+    #idle (never patrolled or just finished first boot)
+    #stopped (patrol robot that was stopped by the user, now wants to resume)
+    ALLOWED_STATES_FOR_START = {"idle", "stopped"}
+    if robot.estado_operativo not in ALLOWED_STATES_FOR_START:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Cannot start patrol: robot is currently '{robot.estado_operativo}'. "
+                f"The robot must be in one of {ALLOWED_STATES_FOR_START} before patrol can be started."
+            )
+        )
 
     #logic to notify the robot in real time that it should start patrolling can be added here (kafka)
+    
+    producer : Producer = app.state.producer_robot_comms
+
+    command_payload = {
+        "robot_id": robot_id,
+        "command": "start_patrol",
+        "timestamp": datetime.datetime.utcnow().isoformat()
+    }
+
+    try:
+        producer.produce(
+            topic=settings.kafka_robot_commands_topic,
+            key=robot_id,
+            value=json.dumps(command_payload).encode('utf-8'),
+        )
+        
+        producer.flush(timeout=5.0)  # Trigger delivery of the message
+    
+    except Exception as e:
+        print(f"Error sending START command to Kafka: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Failed to send command to robot"
+        )
+
+    # robot.estado_operativo = "patrolling"
+    # db.commit()
+    # db.refresh(robot)
 
     return robot
 
@@ -625,12 +714,45 @@ async def stop_patrol(robot_id: str, current_user: Usuario = Depends(get_current
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have permission to control this robot"
         )
-
-    robot.estado_operativo = "idle"
-    db.commit()
-    db.refresh(robot)
+    
+    STOPPABLE_STATES = {"patrolling"}  # Define the states from which the robot can be stopped
+    if robot.estado_operativo not in STOPPABLE_STATES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Cannot stop patrol: robot is currently '{robot.estado_operativo}'. "
+                f"Only robots {STOPPABLE_STATES} can be stopped."
+            )
+        )
 
     #logic to notify the robot in real time that it should stop patrolling can be added here (kafka)
+
+    producer : Producer = app.state.producer_robot_comms
+
+    command_payload = {
+        "robot_id": robot_id,
+        "command": "stop_patrol",
+        "timestamp": datetime.datetime.utcnow().isoformat()
+    }
+
+    try:
+        producer.produce(
+            topic=settings.kafka_robot_commands_topic,
+            key=robot_id,
+            value=json.dumps(command_payload).encode('utf-8'),
+        )
+        
+        producer.flush(timeout=5.0)  # Trigger delivery of the message
+    except Exception as e:
+        print(f"Error sending STOP command to Kafka: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Failed to send command to robot"
+        )
+    
+    # robot.estado_operativo = "stopped"
+    # db.commit()
+    # db.refresh(robot)
 
     return robot
 
@@ -730,7 +852,6 @@ async def get_incident_video(id: UUID, current_user: Usuario = Depends(get_curre
         )
 
     return IncidenteURLRespuesta(video_url=video_url)
-
 
 @app.put(
         "/user/update-password",
@@ -958,13 +1079,6 @@ async def admin_revoke_permissions(
     
     return user
 
-
-if __name__ == "__main__":
-    print("Levantando consumidores de Kafka en segundo plano...")
-    incident_consumer, telemetry_consumer = create_server_consumers()
-    
-    threading.Thread(target=detect_incident, args=(incident_consumer,), daemon=True).start()
-    threading.Thread(target=serve_telemetry, args=(telemetry_consumer,), daemon=True).start()
-    
+if __name__ == "__main__":    
     print("🌐 Arrancando servidor FastAPI...")
     uvicorn.run(app, host="0.0.0.0", port=8000) 
