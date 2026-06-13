@@ -14,6 +14,8 @@ import os
 import time
 import threading
 
+from secret_helper_interfaces.srv import GetToken
+
 class DetectIncidentNode(Node):
 
     def __init__(self):
@@ -51,8 +53,30 @@ class DetectIncidentNode(Node):
         self.timer = None
         
         self.post_trigger_counter = 0
-        
+
         os.makedirs('tmp', exist_ok=True)
+
+        # Token JWT gestionado por secret_helper: lo pedimos al servicio get_robot_token
+        self.token_client = self.create_client(GetToken, 'get_robot_token')
+        self.current_token = None
+        self.create_timer(10.0, self._refresh_token)
+
+    def _refresh_token(self):
+        if not self.token_client.service_is_ready():
+            return
+        future = self.token_client.call_async(GetToken.Request())
+        future.add_done_callback(self._on_token)
+
+    def _on_token(self, future):
+        try:
+            resp = future.result()
+        except Exception as e:
+            self.get_logger().warn(f'Token service call failed: {e}')
+            return
+        if resp.success:
+            self.current_token = resp.token
+        else:
+            self.get_logger().warn(f'secret_helper not ready: {resp.message}')
 
     def reset_cooldown(self):
         self.cooldown = False
@@ -122,8 +146,8 @@ class DetectIncidentNode(Node):
         }
         incident_headers = []
 
-        # TENGO QUE CAMBIAR ESTO PARA QUE USE UN HELPER QUE TRABAJE CON LOS SECRETOS DEL ROBOT
-        robot_token = os.getenv("ROBOT_JWT_TOKEN")
+        # Token JWT obtenido del servicio get_robot_token (secret_helper), cacheado.
+        robot_token = self.current_token
         if robot_token:
             incident_headers = [("Authorization", f"Bearer {robot_token}".encode("utf-8"))]
         self.kafkaProducer.produce(
@@ -134,8 +158,6 @@ class DetectIncidentNode(Node):
         self.kafkaProducer.flush()
 
     def detect_incident(self, image):
-        # Placeholder for actual incident detection logic
-        # For demonstration, we will just return False
         target_classes = ['person']
         confidence_threshold = float(os.getenv('DETECTION_CONFIDENCE_THRESHOLD'))
 

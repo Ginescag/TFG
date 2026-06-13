@@ -25,11 +25,17 @@ RUN apt-get update && apt-get install -y \
     ros-humble-turtlebot3-simulations \
     ros-humble-turtlebot3-gazebo \
     ros-humble-gazebo-ros-pkgs \
+    ros-humble-irobot-create-msgs \
+    ros-humble-nav2-simple-commander \
     qtwayland5 \
     && rm -rf /var/lib/apt/lists/*
 
+
 # 3. Librerías Python
-RUN pip3 install confluent-kafka requests
+RUN pip3 install --no-cache-dir torch torchvision \
+        --index-url https://download.pytorch.org/whl/cpu \
+ && pip3 install --no-cache-dir confluent-kafka requests boto3 ultralytics httpx \
+ && pip3 install --no-cache-dir "numpy<2"
 
 # 4. Workspace
 WORKDIR /robot_ws

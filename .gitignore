@@ -14,7 +14,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
@@ -136,7 +135,11 @@ celerybeat.pid
 
 # Environments
 .env
+.env.container
 .envrc
+
+# Token JWT del robot (secret_helper) — no subir secretos
+robot_ws/secrets/
 .venv
 env/
 venv/
@@ -260,3 +263,5 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+.claude/
+TEST_PLAN.md

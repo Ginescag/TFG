@@ -17,6 +17,8 @@ from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 
+from secret_helper_interfaces.srv import GetToken
+
 class PatrolOrchestrator(Node):
     def __init__(self):
         super().__init__('patrol_orchestrator')
@@ -33,7 +35,6 @@ class PatrolOrchestrator(Node):
         self.declare_parameter('kafka_broker_url', os.getenv('KAFKA_BROKER_URL', ''))
         self.declare_parameter('kafka_robot_commands_topic', os.getenv('KAFKA_ROBOT_COMMANDS_TOPIC', 'robot_commands'))
         self.declare_parameter('server_url', os.getenv('SERVER_URL', ''))
-        self.declare_parameter('robot_jwt', os.getenv('ROBOT_JWT', ''))
         self.declare_parameter('heartbeat_interval_secs', 10.0)
 
         self.map_filepath = self.get_parameter('map_filepath').value
@@ -49,8 +50,11 @@ class PatrolOrchestrator(Node):
         self.kafka_broker_url = str(self.get_parameter('kafka_broker_url').value).strip()
         self.kafka_robot_commands_topic = str(self.get_parameter('kafka_robot_commands_topic').value).strip()
         self.server_url = str(self.get_parameter('server_url').value).strip().rstrip('/')
-        self.robot_jwt = str(self.get_parameter('robot_jwt').value).strip()
         self.heartbeat_interval_secs = float(self.get_parameter('heartbeat_interval_secs').value)
+
+        # Token JWT gestionado por secret_helper (servicio get_robot_token), cacheado.
+        self.token_client = self.create_client(GetToken, 'get_robot_token')
+        self.current_token = None
 
         self.state = 'EXPLORING'
         self.waypoints_queue = deque()
@@ -87,18 +91,41 @@ class PatrolOrchestrator(Node):
         else:
             self.get_logger().error('Kafka command consumer not started due to missing config.')
 
-        self.get_logger().info('Waiting for Nav2...')
-        self.navigator.waitUntilNav2Active()
+        self.get_logger().info('Waiting for Nav2 (bt_navigator) to become active...')
+        # En modo SLAM no existe amcl, y slam_toolbox corre sin lifecycle gestionable
+        # (no expone get_state). El gate real para enviar goals es bt_navigator, así que
+        # esperamos solo a él. Con localizer='bt_navigator', waitUntilNav2Active espera a
+        # bt_navigator y se salta _waitForInitialPose (que solo corre si localizer=='amcl').
+        self.navigator.waitUntilNav2Active(localizer='bt_navigator')
 
         self.timer = self.create_timer(1.0, self.state_machine)
         self.command_timer = self.create_timer(0.5, self.poll_command_topic)
+        # Refresco no bloqueante del token (secret_helper ya refresca cada hora).
+        self.token_timer = self.create_timer(10.0, self._refresh_token)
 
-        if self.server_url and self.robot_jwt:
+        if self.server_url:
             self.heartbeat_timer = self.create_timer(self.heartbeat_interval_secs, self.send_heartbeat)
             self.get_logger().info(f'Heartbeat enabled → {self.server_url} every {self.heartbeat_interval_secs}s')
         else:
             self.heartbeat_timer = None
-            self.get_logger().warn('Heartbeat disabled: SERVER_URL or ROBOT_JWT not set. Server DB will not reflect real robot state.')
+            self.get_logger().warn('Heartbeat disabled: SERVER_URL not set. Server DB will not reflect real robot state.')
+
+    def _refresh_token(self):
+        if not self.token_client.service_is_ready():
+            return
+        future = self.token_client.call_async(GetToken.Request())
+        future.add_done_callback(self._on_token)
+
+    def _on_token(self, future):
+        try:
+            resp = future.result()
+        except Exception as e:
+            self.get_logger().warn(f'Token service call failed: {e}')
+            return
+        if resp.success:
+            self.current_token = resp.token
+        else:
+            self.get_logger().warn(f'secret_helper not ready: {resp.message}')
 
     def create_pose(self, x, y, yaw):
         pose = PoseStamped()
@@ -135,12 +162,16 @@ class PatrolOrchestrator(Node):
         It is the source of truth that keeps the server DB synchronized
         with what the robot is actually doing.
         """
+        if self.current_token is None:
+            self.get_logger().debug('Heartbeat skipped: token not available yet from secret_helper.')
+            return
+
         estado = self.get_estado_operativo()
         try:
             response = httpx.put(
                 f'{self.server_url}/robot/heartbeat',
                 json={'estado_operativo': estado},
-                headers={'Authorization': f'Bearer {self.robot_jwt}'},
+                headers={'Authorization': f'Bearer {self.current_token}'},
                 timeout=5.0
             )
             if response.status_code == 200:

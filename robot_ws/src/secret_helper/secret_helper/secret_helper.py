@@ -7,8 +7,7 @@ import threading
 import time
 from pathlib import Path
 
-# Nota: Tengo que editar package.xml y CMakeLists.txt para que se compile este .srv
-from secret_helper.srv import GetToken
+from secret_helper_interfaces.srv import GetToken
 
 class SecretHelperNode(Node):
     def __init__(self):

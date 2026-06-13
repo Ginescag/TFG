@@ -89,6 +89,26 @@ services:
     volumes:
       - minio_data:/data
 
+  init-minio:
+    image: minio/mc:latest
+    container_name: tfg_init_minio
+    depends_on:
+      - minio
+    entrypoint: [ '/bin/sh', '-c' ]
+    command: |
+      "
+      echo 'Esperando a MinIO...'
+      until mc alias set tfg http://minio:9000 ${MINIO_ACCESS_KEY} ${MINIO_SECRET_KEY}; do
+        echo 'MinIO no disponible aún, reintentando en 2s...'
+        sleep 2
+      done
+
+      echo 'Creando bucket...'
+      mc mb -p tfg/${MINIO_BUCKET_NAME:-tfg-incidentes}
+
+      echo 'Bucket listo. Me apago.'
+      "
+
   grafana:
     image: grafana/grafana:latest
     container_name: tfg_grafana
@@ -96,10 +116,16 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: ${GF_ADMIN_USER}
       GF_SECURITY_ADMIN_PASSWORD: ${GF_ADMIN_PASSWORD}
+      # Consumidas por el datasource provisionado (grafana/provisioning/datasources/influxdb.yml)
+      INFLUXDB_ORG: ${INFLUXDB_ORG}
+      INFLUXDB_BUCKET: ${INFLUXDB_BUCKET}
+      INFLUXDB_TOKEN: ${INFLUXDB_TOKEN}
     ports:
       - "3000:3000"
     volumes:
       - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
     depends_on:
       - influxdb
 

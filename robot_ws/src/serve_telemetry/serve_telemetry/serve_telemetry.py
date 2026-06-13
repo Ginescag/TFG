@@ -10,6 +10,8 @@ from sensor_msgs.msg import BatteryState
 from nav_msgs.msg import Odometry
 from irobot_create_msgs.msg import DockStatus, KidnapStatus, SlipStatus, WheelStatus
 
+from secret_helper_interfaces.srv import GetToken
+
 class ServeTelemetryNode(Node):
     def __init__(self):
         super().__init__('serve_telemetry_node')
@@ -55,6 +57,30 @@ class ServeTelemetryNode(Node):
         # 4. Temporizador de envío
         self.timer = self.create_timer(1.0, self.publish_telemetry)
 
+        # 5. Token JWT gestionado por secret_helper (servicio get_robot_token), cacheado.
+        #    Refresco no bloqueante: una llamada síncrona dentro de un timer callback
+        #    bloquearía el executor de hilo único.
+        self.token_client = self.create_client(GetToken, 'get_robot_token')
+        self.current_token = None
+        self.create_timer(10.0, self._refresh_token)
+
+    def _refresh_token(self):
+        if not self.token_client.service_is_ready():
+            return
+        future = self.token_client.call_async(GetToken.Request())
+        future.add_done_callback(self._on_token)
+
+    def _on_token(self, future):
+        try:
+            resp = future.result()
+        except Exception as e:
+            self.get_logger().warn(f'Token service call failed: {e}')
+            return
+        if resp.success:
+            self.current_token = resp.token
+        else:
+            self.get_logger().warn(f'secret_helper not ready: {resp.message}')
+
     # --- CALLBACKS PARA ACTUALIZAR EL ESTADO ---
     def battery_callback(self, msg):
         self.current_state["bateria"] = msg.percentage * 100.0
@@ -86,9 +112,9 @@ class ServeTelemetryNode(Node):
         }
         payload.update(self.current_state)
 
-        # this is handled by secret handler, needs to be changed
+        # Token JWT obtenido del servicio get_robot_token (secret_helper), cacheado.
         headers = []
-        robot_token = os.getenv("ROBOT_JWT_TOKEN")
+        robot_token = self.current_token
         if robot_token:
             headers = [("Authorization", f"Bearer {robot_token}".encode("utf-8"))]
 

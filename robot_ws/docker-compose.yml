@@ -8,13 +8,27 @@ services:
     tty: true
     volumes:
       - .:/robot_ws
-      - /tmp/.X11-unix:/tmp/.X11-unix
-      - /mnt/wslg:/mnt/wslg
-    network_mode: host
+      - ./secrets:/secrets        # token JWT de secret_helper (persiste entre recreaciones)
+      - /run/desktop/mnt/host/wslg/.X11-unix:/tmp/.X11-unix   # socket X real de WSLg (Docker Desktop)
+      - /run/desktop/mnt/host/wslg:/mnt/wslg                  # WSLg real (wayland-0, runtime-dir, PulseServer)
+      - /usr/lib/wsl:/usr/lib/wsl    # libs de WSLg (libd3d12core.so) para render GPU en Gazebo
+
+    networks:
+      - infra
+
+    # Variables de los nodos (direcciones de red interna). Ver .env.container
+    env_file:
+      - .env.container
+    # Solo lo que depende del host (sustitucion ${...}, no va en el env_file)
     environment:
       - DISPLAY=${DISPLAY:-:0}
       - WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-0}
       - XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/mnt/wslg/runtime-dir}
       - PULSE_SERVER=${PULSE_SERVER:-/mnt/wslg/PulseServer}
+      - LD_LIBRARY_PATH=/usr/lib/wsl/lib    # para que Mesa d3d12 encuentre las libs de WSLg (GPU)
     privileged: true
     command: /bin/bash
+networks:
+  infra:
+    external: true
+    name: backend_default
