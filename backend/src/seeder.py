@@ -1,6 +1,6 @@
 import sys
 import os
-from time import time
+import time
 from uuid import uuid4
 
 # Añadimos la carpeta actual al path para que Python encuentre el módulo 'src'
@@ -9,6 +9,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from src.database import SessionLocal
 from src.models import Usuario, Robot, Incidente
 from src.security import get_password_hash, generar_secreto_robot
+from src.config import settings
 
 def seed():
     db = SessionLocal()
@@ -35,7 +36,7 @@ def seed():
         user_email = "user@tfg.com"
         user = db.query(Usuario).filter(Usuario.email == user_email).first()
         if not user:
-            print("👤 Creando usuario normal...")
+            print("Creando usuario normal...")
             user = Usuario(
                 nombre="Ginés Piloto",
                 email=user_email,
@@ -48,7 +49,7 @@ def seed():
             db.refresh(user)
 
         # 3. Crear Robots para el usuario normal
-        print("🤖 Configurando robots...")
+        print("Configurando robots...")
         
         # Robot 1: Ya operativo (con secreto generado)
         rbt1_id = "RBT-01"
@@ -82,36 +83,36 @@ def seed():
         db.commit()
 
         # 4. Crear Incidentes de prueba para el Robot 1
-        print("🚨 Generando incidentes históricos...")
+        print("Generando incidentes históricos...")
         incidentes_count = db.query(Incidente).filter(Incidente.robot_id == rbt1_id).count()
         if incidentes_count == 0:
             inc1 = Incidente(
                 id=uuid4(),
                 robot_id=rbt1_id,
-                bucket_name=os.getenv("MINIO_BUCKET_NAME"),
+                bucket_name=settings.minio_bucket_name,
                 video_filename=f'incident_{int(time.time())}_RBT-01.mp4',
                 revisado=False
             )
             inc2 = Incidente(
                 id=uuid4(),
                 robot_id=rbt1_id,
-                bucket_name=os.getenv("MINIO_BUCKET_NAME"),
+                bucket_name=settings.minio_bucket_name,
                 video_filename=f'incident_{int(time.time())}_RBT-01_2.mp4',
                 revisado=True
             )
             db.add_all([inc1, inc2])
             db.commit()
 
-        print("\n✅ ¡Base de datos poblada con éxito!")
+        print("\n ¡Base de datos poblada con éxito!")
         print("-" * 50)
-        print(f"🔑 USER LOGIN: {user_email} / user123")
-        print(f"🔑 ADMIN LOGIN: {admin_email} / admin123")
-        print(f"🤖 ROBOT 1 ID: {rbt1_id} | SECRET: {rbt1_secret}")
-        print(f"🤖 ROBOT 2 ID: {rbt2_id} | (Pendiente de First Boot)")
+        print(f"USER LOGIN: {user_email} / user123")
+        print(f"ADMIN LOGIN: {admin_email} / admin123")
+        print(f"ROBOT 1 ID: {rbt1_id} | SECRET: {rbt1_secret}")
+        print(f"ROBOT 2 ID: {rbt2_id} | (Pendiente de First Boot)")
         print("-" * 50)
 
     except Exception as e:
-        print(f"❌ Error durante el seeding: {e}")
+        print(f" Error durante el seeding: {e}")
         db.rollback()
     finally:
         db.close()

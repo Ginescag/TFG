@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     #--- 7. grafana ---
     gf_admin_user: str
     gf_admin_password: str
+    # URL pública de Grafana (la que abre el navegador del cliente) y UID del dashboard de telemetría
+    grafana_url: str = "http://localhost:3000"
+    grafana_dashboard_uid: str = "robot-telemetry"
 
     # --- 6. Seguridad (JWT) ---
     secret_key: str

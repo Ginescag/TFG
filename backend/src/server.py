@@ -3,6 +3,7 @@ import datetime
 import json
 import threading
 from uuid import UUID
+from urllib.parse import quote
 import uvicorn
 
 from fastapi import FastAPI, Depends, HTTPException, status, Request
@@ -17,7 +18,7 @@ from src.dependencies import get_current_admin, get_current_user, get_current_ro
 from src.config import settings
 from src.database import SessionLocal, get_db
 from src.models import Usuario, Robot, Incidente
-from src.schemas import IncidenteRespuesta, IncidenteURLRespuesta, RobotAuthParams, RobotHeartbeat, RobotJWTRespuesta, UsuarioActualizar, UsuarioActualizarPassword, UsuarioBase, UsuarioJWTRespuesta, UsuarioLogin, UsuarioRegistro, UsuarioRespuesta, RobotAlta, RobotRespuesta, RobotFirstBootRespuesta, robotRespuestaDelete
+from src.schemas import IncidenteRespuesta, IncidenteURLRespuesta, RobotAuthParams, RobotHeartbeat, RobotJWTRespuesta, UsuarioActualizar, UsuarioActualizarPassword, UsuarioBase, UsuarioJWTRespuesta, UsuarioLogin, UsuarioRegistro, UsuarioRespuesta, RobotAlta, RobotRespuesta, RobotFirstBootRespuesta, robotRespuestaDelete, DashboardURLRespuesta, RobotAliasActualizar
 from src.security import get_password_hash, verificar_token, verify_password, generar_secreto_robot, generate_jwt_token
 
 # 1. Initialize the FastAPI application
@@ -118,7 +119,6 @@ async def shutdown_event():
     if producer:
         print("Cerrando Kafka producer...")
         producer.flush()
-        producer.close()
 
 #============================
 # 4. ROBOT ENDPOINTS
@@ -139,8 +139,7 @@ async def robot_heartbeat(heartbeat: RobotHeartbeat, curr_robot: Robot = Depends
     el servidor actualiza la DB con el valor que manda el robot, no al revés.
     """
 
-    # Vocabulario canónico de estados operativos.
-    # Debe coincidir exactamente con los strings que emite patrol_nav.py.
+    #estados operativos.
     VALID_OPERATIONAL_STATES = {
         "idle",        # Robot registrado pero sin mapa / recién arrancado
         "exploring",   # FSM: EXPLORING
@@ -620,6 +619,39 @@ async def delete_robot(robot_id: str, current_user: Usuario = Depends(get_curren
     
     return robotRespuestaDelete(robot_id=robot_id)  # Devuelve el ID del robot eliminado para que Flutter pueda actualizar su UI
 
+@app.get(
+        "/user/{robot_id}/dashboard-url",
+        response_model=DashboardURLRespuesta,
+        status_code=status.HTTP_200_OK,
+        tags=["Robots"]
+        )
+async def get_robot_dashboard_url(robot_id: str, current_user: Usuario = Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    Devuelve la URL de Grafana (modo kiosk) filtrada al robot indicado.
+    Solo el propietario del robot puede obtenerla.
+    """
+    robot = db.query(Robot).filter(Robot.id == robot_id).first()
+    if not robot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Robot not found"
+        )
+
+    if robot.usuario_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to view this robot"
+        )
+
+    base = settings.grafana_url.rstrip("/")
+    url = (
+        f"{base}/d/{settings.grafana_dashboard_uid}/robot-telemetry"
+        f"?orgId=1&kiosk&theme=light"
+        f"&var-robot_id={quote(robot.id)}"
+        f"&from=now-6h&to=now&refresh=10s"
+    )
+    return DashboardURLRespuesta(url=url)
+
 #USER --> SERVER --> ROBOT
 @app.put(
         "/user/{robot_id}/start-patrol",
@@ -685,6 +717,8 @@ async def start_patrol(robot_id: str, current_user: Usuario = Depends(get_curren
             detail="Failed to send command to robot"
         )
 
+    # El estado lo gobierna el heartbeat del robot (exploring → ... → patrolling).
+    # No se marca aquí para no saltarse la fase de mapeo en la primera vuelta.
     # robot.estado_operativo = "patrolling"
     # db.commit()
     # db.refresh(robot)
@@ -750,9 +784,77 @@ async def stop_patrol(robot_id: str, current_user: Usuario = Depends(get_current
             detail="Failed to send command to robot"
         )
     
-    # robot.estado_operativo = "stopped"
-    # db.commit()
-    # db.refresh(robot)
+    robot.estado_operativo = "stopped"
+    db.commit()
+    db.refresh(robot)
+
+    return robot
+
+#USER --> SERVER --> ROBOT
+@app.put(
+        "/user/{robot_id}/reinstall",
+        response_model=RobotRespuesta,
+        status_code=status.HTTP_200_OK,
+        tags=["Robots"]
+        )
+async def reinstall_robot(robot_id: str, current_user: Usuario = Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    Borra el mapa guardado del robot y lo devuelve a 'idle' para rehacer el ciclo
+    completo (explorar → mapear → patrullar). Útil al cambiar el robot de lugar.
+    """
+    robot = db.query(Robot).filter(Robot.id == robot_id, Robot.usuario_id == current_user.id).first()
+    if not robot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Robot not found for this user or robot does not exist"
+        )
+
+    producer : Producer = app.state.producer_robot_comms
+
+    command_payload = {
+        "robot_id": robot_id,
+        "command": "reinstall",
+        "timestamp": datetime.datetime.utcnow().isoformat()
+    }
+
+    try:
+        producer.produce(
+            topic=settings.kafka_robot_commands_topic,
+            key=robot_id,
+            value=json.dumps(command_payload).encode('utf-8'),
+        )
+        producer.flush(timeout=5.0)
+    except Exception as e:
+        print(f"Error sending REINSTALL command to Kafka: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Failed to send command to robot"
+        )
+
+    robot.estado_operativo = "idle"
+    db.commit()
+    db.refresh(robot)
+
+    return robot
+
+@app.put(
+        "/user/{robot_id}/alias",
+        response_model=RobotRespuesta,
+        status_code=status.HTTP_200_OK,
+        tags=["Robots"]
+        )
+async def update_robot_alias(robot_id: str, payload: RobotAliasActualizar, current_user: Usuario = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Renombra (alias) un robot del usuario."""
+    robot = db.query(Robot).filter(Robot.id == robot_id, Robot.usuario_id == current_user.id).first()
+    if not robot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Robot not found for this user or robot does not exist"
+        )
+
+    robot.alias = payload.alias
+    db.commit()
+    db.refresh(robot)
 
     return robot
 
@@ -807,12 +909,12 @@ async def list_robot_incidents(robot_id: str,current_user: Usuario = Depends(get
         status_code=status.HTTP_200_OK,
         tags=["Users"]
 )
-async def get_incident_video(id: UUID, current_user: Usuario = Depends(get_current_user), db: Session = Depends(get_db)):
+async def get_incident_video(incident_id: UUID, current_user: Usuario = Depends(get_current_user), db: Session = Depends(get_db)):
     """
     Endpoint to get the video URL of a specific incident.
     """
 
-    incident = db.query(Incidente).join(Robot).filter(Incidente.id == id, Robot.usuario_id == current_user.id).first()
+    incident = db.query(Incidente).join(Robot).filter(Incidente.id == incident_id, Robot.usuario_id == current_user.id).first()
 
     if not incident:
         raise HTTPException(

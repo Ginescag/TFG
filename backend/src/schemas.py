@@ -94,6 +94,14 @@ class robotRespuestaDelete(BaseModel):
     status: str = "robot_deleted"
     robot_id: str
 
+class DashboardURLRespuesta(BaseModel):
+    """URL de Grafana (filtrada al robot) que la app abre en el navegador"""
+    url: str
+
+class RobotAliasActualizar(BaseModel):
+    """Body para renombrar (alias) un robot"""
+    alias: str
+
 # ==========================================
 # 3. INCIDENTE SCHEMAS
 # ==========================================

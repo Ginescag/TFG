@@ -265,3 +265,6 @@ app.*.map.json
 /android/app/release
 .claude/
 TEST_PLAN.md
+
+# Scripts locales de arranque/pruebas (no versionar)
+scripts/

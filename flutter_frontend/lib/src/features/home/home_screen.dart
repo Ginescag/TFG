@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
@@ -8,6 +10,9 @@ import '../../providers.dart';
 import '../../widgets/app_drawer.dart';
 import '../../widgets/error_view.dart';
 import '../../widgets/loading_view.dart';
+
+/// Estados en los que el robot está "activo" (el switch se muestra ON).
+const _activeStates = {'exploring', 'saving_map', 'planning', 'patrolling'};
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -91,6 +96,22 @@ class _HomeBody extends ConsumerStatefulWidget {
 
 class _HomeBodyState extends ConsumerState<_HomeBody> {
   DateTime? _lastUpdate;
+  Timer? _pollTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    // Refresco en segundo plano para reflejar el estado real (heartbeat) del robot.
+    _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      ref.read(robotsControllerProvider.notifier).silentRefresh();
+    });
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
+  }
 
   void _registerToggle() {
     if (!mounted) return;
@@ -111,6 +132,30 @@ class _HomeBodyState extends ConsumerState<_HomeBody> {
   @override
   Widget build(BuildContext context) {
     final robots = widget.robots;
+
+    // Aviso cuando un robot pasa a 'patrolling': ya se puede detener.
+    ref.listen<AsyncValue<List<Robot>>>(robotsControllerProvider, (prev, next) {
+      final before = prev?.valueOrNull ?? const <Robot>[];
+      final after = next.valueOrNull ?? const <Robot>[];
+      for (final r in after) {
+        Robot? old;
+        for (final b in before) {
+          if (b.id == r.id) {
+            old = b;
+            break;
+          }
+        }
+        if (old != null &&
+            old.estadoOperativo != 'patrolling' &&
+            r.estadoOperativo == 'patrolling') {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('${r.alias} ya está patrullando: ahora puedes detenerlo.'),
+            ),
+          );
+        }
+      }
+    });
 
     bool desarmadoActive;
     bool armadoActive;
@@ -151,28 +196,79 @@ class _HomeBodyState extends ConsumerState<_HomeBody> {
                     separatorBuilder: (_, __) => const SizedBox(height: 24),
                     itemBuilder: (context, index) {
                       final robot = robots[index];
+                      final isActive = _activeStates.contains(robot.estadoOperativo);
                       final isPatrolling = robot.estadoOperativo == 'patrolling';
+                      final hint = isPatrolling
+                          ? 'Patrullando · puedes detenerlo'
+                          : isActive
+                              ? 'Preparando patrulla (mapeando) · no se puede detener todavía'
+                              : 'En espera';
                       return ShadCard(
                         title: Text(robot.alias),
-                        description: Text('Status: ${robot.estadoOperativo}'),
+                        description: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Status: ${robot.estadoOperativo}'),
+                            Text(hint, style: const TextStyle(fontSize: 12)),
+                          ],
+                        ),
                         footer: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             ShadBadge(
                               child: Text(
-                                isPatrolling ? 'PATROLING' : 'ON HOLD',
+                                isPatrolling
+                                    ? 'PATROLLING'
+                                    : isActive
+                                        ? 'PREPARING'
+                                        : 'ON HOLD',
                               ),
                             ),
                             ShadSwitch(
-                              value: isPatrolling,
+                              value: isActive,
                               onChanged: (value) async {
-                                await ref
-                                    .read(robotsControllerProvider.notifier)
-                                    .setPatrol(
-                                      robotId: robot.id,
-                                      enable: value,
+                                try {
+                                  await ref
+                                      .read(robotsControllerProvider.notifier)
+                                      .setPatrol(
+                                        robotId: robot.id,
+                                        enable: value,
+                                      );
+                                  _registerToggle();
+                                } on ApiException catch (e) {
+                                  if (!mounted) return;
+                                  if (e.statusCode == 409) {
+                                    showShadDialog(
+                                      context: context,
+                                      builder: (ctx) => ShadDialog.alert(
+                                        title: const Text('El robot aún no está listo'),
+                                        description: const Padding(
+                                          padding: EdgeInsets.only(bottom: 8),
+                                          child: Text(
+                                            'El robot todavía está configurándose (mapeando). '
+                                            'No se puede detener hasta que esté patrullando.',
+                                          ),
+                                        ),
+                                        actions: [
+                                          ShadButton(
+                                            child: const Text('Entendido'),
+                                            onPressed: () => Navigator.of(ctx).pop(),
+                                          ),
+                                        ],
+                                      ),
                                     );
-                                _registerToggle();
+                                  } else {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text(e.message)),
+                                    );
+                                  }
+                                } catch (e) {
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('Error: $e')),
+                                    );
+                                  }
+                                }
                               },
                             ),
                           ],

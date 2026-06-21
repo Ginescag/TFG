@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../data/api_exception.dart';
 import '../../models/robot.dart';
@@ -133,19 +134,37 @@ class _RobotsList extends ConsumerWidget {
             children: [
               ShadIconButton.outline(
                 icon: const Icon(Icons.edit),
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Edit alias pending')),
-                  );
-                },
+                onPressed: () => _showEditAliasDialog(context, ref, robot),
               ),
               const SizedBox(width: 8),
               ShadIconButton.outline(
                 icon: const Icon(Icons.settings_backup_restore),
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Reinstall pending')),
-                  );
+                onPressed: () => _showReinstallDialog(context, ref, robot),
+              ),
+              const SizedBox(width: 8),
+              ShadIconButton.outline(
+                icon: const Icon(Icons.insights),
+                onPressed: () async {
+                  try {
+                    final url = await ref
+                        .read(robotsRepositoryProvider)
+                        .getDashboardUrl(robot.id);
+                    final ok = await launchUrl(
+                      Uri.parse(url),
+                      mode: LaunchMode.externalApplication,
+                    );
+                    if (!ok && context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('No se pudo abrir Grafana')),
+                      );
+                    }
+                  } catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Error abriendo stats: $e')),
+                      );
+                    }
+                  }
                 },
               ),
               const Spacer(),
@@ -163,4 +182,72 @@ class _RobotsList extends ConsumerWidget {
       },
     );
   }
+}
+
+Future<void> _showEditAliasDialog(
+    BuildContext context, WidgetRef ref, Robot robot) async {
+  final aliasController = TextEditingController(text: robot.alias);
+  await showShadDialog<void>(
+    context: context,
+    builder: (context) => ShadDialog(
+      title: const Text('Editar alias'),
+      description: Text('Robot ${robot.id}'),
+      actions: [
+        ShadButton.outline(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        ShadButton(
+          onPressed: () async {
+            final alias = aliasController.text.trim();
+            if (alias.isEmpty) return;
+            await ref
+                .read(robotsControllerProvider.notifier)
+                .updateAlias(robotId: robot.id, alias: alias);
+            if (context.mounted) Navigator.pop(context);
+          },
+          child: const Text('Save'),
+        ),
+      ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        child: ShadInput(
+          controller: aliasController,
+          placeholder: const Text('Alias'),
+        ),
+      ),
+    ),
+  );
+}
+
+Future<void> _showReinstallDialog(
+    BuildContext context, WidgetRef ref, Robot robot) async {
+  await showShadDialog<void>(
+    context: context,
+    builder: (context) => ShadDialog.alert(
+      title: const Text('Reinstalar robot'),
+      description: const Padding(
+        padding: EdgeInsets.only(bottom: 8),
+        child: Text(
+          'Esto borrará el mapa actual y reiniciará el ciclo: el robot volverá a '
+          '"idle" y mapeará de nuevo. Úsalo si cambias el robot de sitio. ¿Continuar?',
+        ),
+      ),
+      actions: [
+        ShadButton.outline(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        ShadButton.destructive(
+          onPressed: () async {
+            await ref
+                .read(robotsControllerProvider.notifier)
+                .reinstall(robot.id);
+            if (context.mounted) Navigator.pop(context);
+          },
+          child: const Text('Reinstalar'),
+        ),
+      ],
+    ),
+  );
 }

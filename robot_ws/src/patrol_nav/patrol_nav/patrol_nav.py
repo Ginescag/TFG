@@ -26,8 +26,8 @@ class PatrolOrchestrator(Node):
 
         self.declare_parameter('map_filepath', '/robot_ws/src/mapa_patrulla')
         self.declare_parameter('grid_spacing_m', 2.0)
-        self.declare_parameter('explore_idle_secs', 20.0)
-        self.declare_parameter('explore_min_secs', 120.0)
+        self.declare_parameter('explore_idle_secs', 180.0)
+        self.declare_parameter('explore_min_secs', 900.0)
         self.declare_parameter('dock_x', 0.0)
         self.declare_parameter('dock_y', 0.0)
         self.declare_parameter('dock_yaw', 0.0)
@@ -56,7 +56,8 @@ class PatrolOrchestrator(Node):
         self.token_client = self.create_client(GetToken, 'get_robot_token')
         self.current_token = None
 
-        self.state = 'EXPLORING'
+        # Arranca en IDLE: espera al primer comando start_patrol del usuario.
+        self.state = 'IDLE'
         self.waypoints_queue = deque()
         self.explore_process = None
         self.save_map_client = self.create_client(SaveMap, '/map_saver/save_map')
@@ -71,6 +72,7 @@ class PatrolOrchestrator(Node):
         # Canonical vocabulary shared with the server.
         # Each internal FSM state maps to the exact string accepted by the heartbeat.
         self.FSM_TO_OPERATIVO = {
+            'IDLE':           'idle',
             'EXPLORING':      'exploring',
             'SAVING_MAP':     'saving_map',
             'PLANNING':       'planning',
@@ -186,7 +188,9 @@ class PatrolOrchestrator(Node):
             self.get_logger().warn(f'Heartbeat request error: {e}')
 
     def state_machine(self):
-        if self.state == 'EXPLORING':
+        if self.state == 'IDLE':
+            return  # Esperando al primer start_patrol del usuario.
+        elif self.state == 'EXPLORING':
             self.run_exploration()
             
         elif self.state == 'SAVING_MAP':
@@ -234,9 +238,23 @@ class PatrolOrchestrator(Node):
             self.handle_start_patrol()
         elif command == 'stop_patrol':
             self.handle_stop_patrol()
+        elif command == 'reinstall':
+            self.handle_reinstall()
+
+    def _map_exists(self):
+        return os.path.exists(f'{self.map_filepath}.pgm') and os.path.exists(f'{self.map_filepath}.yaml')
 
     def handle_start_patrol(self):
-        if self.state == 'PATROL_STOPPED':
+        if self.state == 'IDLE':
+            # Primer arranque: si ya hay mapa guardado, lo reutilizamos (PLANNING);
+            # si no, hacemos el ciclo completo empezando por exploración.
+            if self._map_exists():
+                self.get_logger().info('start_patrol: existing map found, skipping exploration -> PLANNING.')
+                self.state = 'PLANNING'
+            else:
+                self.get_logger().info('start_patrol: no map found, beginning full cycle -> EXPLORING.')
+                self.state = 'EXPLORING'
+        elif self.state == 'PATROL_STOPPED':
             self.get_logger().info('Received start_patrol. Resuming patrol.')
             self.active_task = None
             self.state = 'PATROLLING'
@@ -265,6 +283,23 @@ class PatrolOrchestrator(Node):
             self.state = 'PATROL_STOPPED'
         else:
             self.get_logger().info('stop_patrol ignored; already stopped.')
+
+    def handle_reinstall(self):
+        self.get_logger().info('Received reinstall. Wiping map and returning to IDLE.')
+        if self.explore_process is not None:
+            self.explore_process.terminate()
+            self.explore_process = None
+        if self.active_task is not None:
+            self.navigator.cancelTask()
+            self.active_task = None
+        self.save_map_future = None
+        self.waypoints_queue.clear()
+        for ext in ('.pgm', '.yaml'):
+            path = f'{self.map_filepath}{ext}'
+            if os.path.exists(path):
+                os.remove(path)
+                self.get_logger().info(f'Deleted old map file: {path}')
+        self.state = 'IDLE'
 
     def destroy_node(self):
         if self.command_consumer is not None:

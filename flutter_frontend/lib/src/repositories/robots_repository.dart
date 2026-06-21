@@ -38,4 +38,22 @@ class RobotsRepository {
     final data = await _api.put<Map<String, dynamic>>('/user/$robotId/stop-patrol');
     return Robot.fromJson(data);
   }
+
+  Future<String> getDashboardUrl(String robotId) async {
+    final data = await _api.get<Map<String, dynamic>>('/user/$robotId/dashboard-url');
+    return data['url'] as String;
+  }
+
+  Future<Robot> reinstall(String robotId) async {
+    final data = await _api.put<Map<String, dynamic>>('/user/$robotId/reinstall');
+    return Robot.fromJson(data);
+  }
+
+  Future<Robot> updateAlias(String robotId, String alias) async {
+    final data = await _api.put<Map<String, dynamic>>(
+      '/user/$robotId/alias',
+      data: {'alias': alias},
+    );
+    return Robot.fromJson(data);
+  }
 }
