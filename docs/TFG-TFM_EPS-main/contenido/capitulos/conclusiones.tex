@@ -1,0 +1,124 @@
+\chapter{Conclusiones}
+\label{cap:conclusiones}
+
+Este capítulo recapitula el trabajo realizado, valora el grado de consecución de los
+objetivos planteados, expone las aportaciones y limitaciones, y traza las líneas de trabajo
+futuro. Por último, se incluye una breve valoración personal.
+
+%% =============================================================================
+\section{Grado de consecución de los objetivos}
+\label{sec:consecucion-objetivos}
+
+El desarrollo de este Trabajo Fin de Grado ha permitido construir un sistema robótico de
+patrulla autónoma funcional e integrado. Retomando los objetivos específicos formulados en
+el Capítulo~\ref{cap:objetivos}, puede afirmarse que se ha implementado la cartografía
+autónoma del entorno mediante exploración y \gls{slam} (OE1) y la generación y ejecución de
+una ruta de cobertura con \gls{nav2} (OE2). El ciclo operativo se coordina mediante un
+orquestador en forma de máquina de estados que encadena exploración, mapeado, planificación,
+patrulla y retorno al punto de carga (OE3). Sobre esa base, se ha integrado la detección de
+personas como incidencia con \gls{yolo} (OE4), se ha diseñado la arquitectura orientada a
+eventos que desacopla el robot del backend (OE5) y se ha desarrollado el servicio de backend
+con persistencia de datos relacionales, de vídeo y de series temporales (OE6). Asimismo, se
+ha implementado el esquema de seguridad basado en \gls{tofu}, \gls{jwt} y control de acceso
+por roles (OE7) y se ha construido la aplicación de usuario multiplataforma con
+\mbox{Flutter} (OE8). Por último, la integración de todos los subsistemas en una solución
+desplegable mediante contenedores se ha completado en su vertiente funcional, validada de
+extremo a extremo en simulación (OE9), si bien la evaluación cuantitativa sobre hardware
+real queda pendiente.
+
+%% =============================================================================
+\section{Aportaciones}
+\label{sec:aportaciones}
+
+La principal aportación del trabajo es la \textbf{integración de extremo a extremo} de un
+sistema de vigilancia robótica con tecnologías de código abierto, que cubre desde la
+cartografía y la patrulla autónoma hasta la notificación de incidencias y su consulta desde
+una aplicación multiplataforma. Frente a soluciones centradas en un único subproblema, este
+trabajo articula navegación, percepción, mensajería, servicios web y aplicación de usuario
+en un único sistema coherente y desplegable. Más allá de esa integración, pueden destacarse
+varias aportaciones concretas:
+
+\begin{itemize}
+  \item \textbf{Arquitectura orientada a eventos.} El desacoplamiento de la capa robótica y
+    el backend mediante un bus de mensajería ha demostrado su valor al permitir desarrollar,
+    probar y desplegar cada componente de forma independiente, y al absorber la
+    indisponibilidad temporal de cualquiera de ellos sin pérdida de eventos.
+  \item \textbf{Orquestación autónoma del ciclo de patrulla.} El diseño del orquestador como
+    una máquina de estados que encadena exploración, mapeado, planificación y patrulla
+    encapsula en un único nodo la coordinación de capacidades heterogéneas, y reutiliza el
+    mapa cuando ya existe para no reexplorar el entorno innecesariamente.
+  \item \textbf{Modelo de seguridad para el robot.} La autenticación del robot mediante el
+    patrón \gls{tofu} y tokens \gls{jwt}, con doble verificación de identidad (en las
+    dependencias del backend y, de nuevo, en el consumidor de eventos), aporta un esquema de
+    confianza adecuado a un dispositivo que opera sin supervisión continua.
+  \item \textbf{Despliegue reproducible.} La descripción declarativa de la infraestructura
+    mediante contenedores permite levantar el sistema completo de forma uniforme, lo que
+    facilita tanto el desarrollo como una futura puesta en producción.
+\end{itemize}
+
+%% =============================================================================
+\section{Limitaciones}
+\label{sec:limitaciones}
+
+El trabajo presenta varias limitaciones que conviene reconocer. La más relevante es que la
+validación realizada es funcional y se ha llevado a cabo en simulación, sin una campaña de
+medición cuantitativa sobre hardware real que respalde el rendimiento del sistema; las
+métricas de navegación, detección y latencia quedan, por tanto, sin caracterizar. Además, la
+estrategia de planificación de la ruta de cobertura es deliberadamente sencilla (un barrido
+en zig-zag) y puede resultar subóptima en estancias de geometría compleja. La detección se
+limita actualmente a la presencia de personas, sin seguimiento de objetos ni distinción
+entre individuos, lo que puede generar alertas redundantes ante una misma persona.
+
+En el plano de la seguridad deben reconocerse dos limitaciones conocidas: el patrón
+\gls{tofu} asume que el primer contacto del robot con el backend es legítimo, asunción que
+sería explotable si un atacante se adelantara al aprovisionamiento; y la política de
+\gls{cors} permanece abierta. Ambas resultan asumibles en el despliegue local y controlado
+actual, pero deben endurecerse antes de un uso en producción. Por último, algunas
+capacidades que se contemplaron en un principio no forman parte de la implementación actual,
+en concreto la transmisión de vídeo en directo, el seguimiento multiobjeto y las
+notificaciones en tiempo real; todas ellas se recogen como líneas de trabajo futuro.
+
+%% =============================================================================
+\section{Trabajo futuro}
+\label{sec:trabajo-futuro}
+
+A partir de las limitaciones anteriores se identifican las siguientes líneas de trabajo
+futuro:
+
+\begin{itemize}
+  \item \textbf{Evaluación cuantitativa sobre hardware real.} Ejecutar una campaña de
+    pruebas sistemática sobre el robot real que permita obtener las métricas previstas en el
+    Capítulo~\ref{cap:resultados} y recalibrar los parámetros ajustados en simulación.
+  \item \textbf{Endurecimiento de la seguridad.} Restringir la política de \gls{cors} y
+    reforzar el aprovisionamiento inicial del robot frente al riesgo del primer contacto, de
+    cara a un despliegue en producción.
+  \item \textbf{Seguimiento multiobjeto.} Incorporar un algoritmo de seguimiento que asigne
+    identificadores persistentes a las personas detectadas y reduzca las alertas
+    redundantes.
+  \item \textbf{Transmisión de vídeo en directo.} Añadir la difusión del vídeo en tiempo
+    real para permitir la supervisión remota durante la patrulla.
+  \item \textbf{Notificaciones en tiempo real.} Avisar al usuario de forma inmediata ante
+    una incidencia mediante notificaciones \textit{push} o canales de comunicación en tiempo
+    real.
+  \item \textbf{Planificación de cobertura avanzada.} Sustituir la rejilla en zig-zag por
+    estrategias de cobertura más eficientes y adaptadas a la geometría del entorno.
+  \item \textbf{Operación multirobot.} Extender el sistema para coordinar varios robots
+    patrullando un mismo espacio.
+\end{itemize}
+
+%% =============================================================================
+\section{Valoración personal}
+\label{sec:valoracion-personal}
+
+La realización de este trabajo me ha permitido integrar en un único proyecto conocimientos
+de áreas muy diversas (robótica, visión por computador, sistemas distribuidos y desarrollo
+de aplicaciones) y enfrentarme a los retos que surgen al hacer que componentes heterogéneos
+colaboren de forma coherente. Construir el sistema de extremo a extremo, y no solo una de
+sus partes, ha sido la faceta más exigente y, a la vez, la más enriquecedora del trabajo.
+
+Más allá del resultado técnico, considero que la principal lección ha sido la importancia de
+un buen diseño arquitectónico: las decisiones tomadas al principio, en especial el
+desacoplamiento mediante eventos, condicionaron favorablemente todo el desarrollo posterior
+y facilitaron cada incorporación sucesiva. Llevar el sistema hasta su validación sobre
+hardware real y completar su evaluación cuantitativa es el paso natural con el que me
+gustaría dar continuidad a lo aquí construido.

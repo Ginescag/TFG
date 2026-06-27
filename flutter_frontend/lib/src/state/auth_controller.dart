@@ -6,7 +6,7 @@ import 'auth_state.dart';
 
 class AuthController extends StateNotifier<AuthState> {
   AuthController(this._repository, this._storage)
-      : super(const AuthState.unknown()) {
+    : super(const AuthState.unknown()) {
     _restoreSession();
   }
 

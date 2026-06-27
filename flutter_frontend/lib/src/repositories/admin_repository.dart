@@ -10,26 +10,59 @@ class AdminRepository {
 
   Future<List<User>> listUsers() async {
     final data = await _api.get<List<dynamic>>('/admin/users');
-    return data.map((item) => User.fromJson(item as Map<String, dynamic>)).toList();
+    return data
+        .map((item) => User.fromJson(item as Map<String, dynamic>))
+        .toList();
   }
 
   Future<List<Robot>> listRobots() async {
     final data = await _api.get<List<dynamic>>('/admin/robots');
-    return data.map((item) => Robot.fromJson(item as Map<String, dynamic>)).toList();
+    return data
+        .map((item) => Robot.fromJson(item as Map<String, dynamic>))
+        .toList();
   }
 
   Future<List<Incident>> listRobotIncidents(String robotId) async {
-    final data = await _api.get<List<dynamic>>('/admin/robots/$robotId/incidents');
-    return data.map((item) => Incident.fromJson(item as Map<String, dynamic>)).toList();
+    final data = await _api.get<List<dynamic>>(
+      '/admin/robots/$robotId/incidents',
+    );
+    return data
+        .map((item) => Incident.fromJson(item as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<String> getIncidentVideoUrl(String incidentId) async {
+    final data = await _api.get<Map<String, dynamic>>(
+      '/admin/incidents/$incidentId/show-video',
+    );
+    return data['video_url'] as String;
+  }
+
+  Future<Incident> getIncident(String incidentId) async {
+    final data = await _api.get<Map<String, dynamic>>(
+      '/admin/incidents/$incidentId',
+    );
+    return Incident.fromJson(data);
+  }
+
+  Future<Incident> markReviewed(String incidentId) async {
+    final data = await _api.put<Map<String, dynamic>>(
+      '/admin/incidents/$incidentId/review',
+    );
+    return Incident.fromJson(data);
   }
 
   Future<User> grantAdmin(int userId) async {
-    final data = await _api.put<Map<String, dynamic>>('/admin/users/$userId/grant');
+    final data = await _api.put<Map<String, dynamic>>(
+      '/admin/users/$userId/grant',
+    );
     return User.fromJson(data);
   }
 
   Future<User> revokeAdmin(int userId) async {
-    final data = await _api.put<Map<String, dynamic>>('/admin/users/$userId/revoke');
+    final data = await _api.put<Map<String, dynamic>>(
+      '/admin/users/$userId/revoke',
+    );
     return User.fromJson(data);
   }
 

@@ -8,6 +8,7 @@ import '../../data/api_exception.dart';
 import '../../models/robot.dart';
 import '../../providers.dart';
 import '../../widgets/app_drawer.dart';
+import '../../widgets/connection_dot.dart';
 import '../../widgets/error_view.dart';
 import '../../widgets/loading_view.dart';
 
@@ -35,11 +36,10 @@ class HomeScreen extends ConsumerWidget {
           ),
           ShadIconButton.outline(
             icon: Icon(
-              themeMode == ThemeMode.dark
-                  ? Icons.dark_mode
-                  : Icons.light_mode,
+              themeMode == ThemeMode.dark ? Icons.dark_mode : Icons.light_mode,
             ),
-            onPressed: () => ref.read(themeControllerProvider.notifier).toggle(),
+            onPressed: () =>
+                ref.read(themeControllerProvider.notifier).toggle(),
           ),
         ],
       ),
@@ -98,12 +98,22 @@ class _HomeBodyState extends ConsumerState<_HomeBody> {
   DateTime? _lastUpdate;
   Timer? _pollTimer;
 
+  /// Robots con una llamada de patrulla en curso (muestran spinner).
+  final Set<String> _pending = {};
+
   @override
   void initState() {
     super.initState();
+    // Al montar ya tenemos datos frescos del robot.
+    _lastUpdate = DateTime.now();
     // Refresco en segundo plano para reflejar el estado real (heartbeat) del robot.
-    _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      ref.read(robotsControllerProvider.notifier).silentRefresh();
+    _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
+      final ok = await ref
+          .read(robotsControllerProvider.notifier)
+          .silentRefresh();
+      if (ok && mounted) {
+        setState(() => _lastUpdate = DateTime.now());
+      }
     });
   }
 
@@ -150,141 +160,191 @@ class _HomeBodyState extends ConsumerState<_HomeBody> {
             r.estadoOperativo == 'patrolling') {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('${r.alias} ya está patrullando: ahora puedes detenerlo.'),
+              content: Text(
+                '${r.alias} ya está patrullando: ahora puedes detenerlo.',
+              ),
             ),
           );
         }
       }
     });
 
-    bool desarmadoActive;
-    bool armadoActive;
+    // Indicador de armado: todo / nada / parcial sobre los estados activos.
+    final activeCount = robots
+        .where((r) => _activeStates.contains(r.estadoOperativo))
+        .length;
+    final desarmadoActive = robots.isNotEmpty && activeCount == 0;
+    final armadoActive = robots.isNotEmpty && activeCount == robots.length;
+    // Estado parcial (0 < activeCount < total): ninguno encendido (ambos outline).
 
-    if (robots.isEmpty) {
-      desarmadoActive = false;
-      armadoActive = false;
-    } else if (robots.length == 1) {
-      final isOn = robots[0].estadoOperativo == 'patrolling';
-      desarmadoActive = !isOn;
-      armadoActive = isOn;
-    } else {
-      desarmadoActive = true;
-      armadoActive = true;
-    }
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-      child: Column(
-        children: [
-          const SizedBox(height: 24),
-          AlarmStatusRow(
-            desarmadoActive: desarmadoActive,
-            armadoActive: armadoActive,
-          ),
-          const SizedBox(height: 40),
-          Expanded(
-            child: robots.isEmpty
-                ? const Center(
-                    child: Text(
-                      'No robots available for patrolling.\n'
-                      'Go to the robots view to add one.',
-                      textAlign: TextAlign.center,
-                    ),
-                  )
-                : ListView.separated(
-                    itemCount: robots.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 24),
-                    itemBuilder: (context, index) {
-                      final robot = robots[index];
-                      final isActive = _activeStates.contains(robot.estadoOperativo);
-                      final isPatrolling = robot.estadoOperativo == 'patrolling';
-                      final hint = isPatrolling
-                          ? 'Patrullando · puedes detenerlo'
-                          : isActive
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 640),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          child: Column(
+            children: [
+              const SizedBox(height: 24),
+              AlarmStatusRow(
+                desarmadoActive: desarmadoActive,
+                armadoActive: armadoActive,
+              ),
+              const SizedBox(height: 40),
+              Expanded(
+                child: robots.isEmpty
+                    ? const Center(
+                        child: Text(
+                          'No robots available for patrolling.\n'
+                          'Go to the robots view to add one.',
+                          textAlign: TextAlign.center,
+                        ),
+                      )
+                    : ListView.separated(
+                        itemCount: robots.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 24),
+                        itemBuilder: (context, index) {
+                          final robot = robots[index];
+                          final isActive = _activeStates.contains(
+                            robot.estadoOperativo,
+                          );
+                          final isPatrolling =
+                              robot.estadoOperativo == 'patrolling';
+                          final hint = isPatrolling
+                              ? 'Patrullando · puedes detenerlo'
+                              : isActive
                               ? 'Preparando patrulla (mapeando) · no se puede detener todavía'
                               : 'En espera';
-                      return ShadCard(
-                        title: Text(robot.alias),
-                        description: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Status: ${robot.estadoOperativo}'),
-                            Text(hint, style: const TextStyle(fontSize: 12)),
-                          ],
-                        ),
-                        footer: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            ShadBadge(
-                              child: Text(
-                                isPatrolling
-                                    ? 'PATROLLING'
-                                    : isActive
+                          return ShadCard(
+                            title: Row(
+                              children: [
+                                ConnectionDot(
+                                  online: robot.estadoConexion == 'online',
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(child: Text(robot.alias)),
+                              ],
+                            ),
+                            description: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Status: ${robot.estadoOperativo}'),
+                                Text(
+                                  hint,
+                                  style: const TextStyle(fontSize: 12),
+                                ),
+                              ],
+                            ),
+                            footer: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                ShadBadge(
+                                  child: Text(
+                                    isPatrolling
+                                        ? 'PATROLLING'
+                                        : isActive
                                         ? 'PREPARING'
                                         : 'ON HOLD',
-                              ),
-                            ),
-                            ShadSwitch(
-                              value: isActive,
-                              onChanged: (value) async {
-                                try {
-                                  await ref
-                                      .read(robotsControllerProvider.notifier)
-                                      .setPatrol(
-                                        robotId: robot.id,
-                                        enable: value,
-                                      );
-                                  _registerToggle();
-                                } on ApiException catch (e) {
-                                  if (!mounted) return;
-                                  if (e.statusCode == 409) {
-                                    showShadDialog(
-                                      context: context,
-                                      builder: (ctx) => ShadDialog.alert(
-                                        title: const Text('El robot aún no está listo'),
-                                        description: const Padding(
-                                          padding: EdgeInsets.only(bottom: 8),
-                                          child: Text(
-                                            'El robot todavía está configurándose (mapeando). '
-                                            'No se puede detener hasta que esté patrullando.',
-                                          ),
+                                  ),
+                                ),
+                                if (_pending.contains(robot.id))
+                                  const SizedBox(
+                                    width: 44,
+                                    child: Center(
+                                      child: SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
                                         ),
-                                        actions: [
-                                          ShadButton(
-                                            child: const Text('Entendido'),
-                                            onPressed: () => Navigator.of(ctx).pop(),
-                                          ),
-                                        ],
                                       ),
-                                    );
-                                  } else {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text(e.message)),
-                                    );
-                                  }
-                                } catch (e) {
-                                  if (mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text('Error: $e')),
-                                    );
-                                  }
-                                }
-                              },
+                                    ),
+                                  )
+                                else
+                                  ShadSwitch(
+                                    value: isActive,
+                                    onChanged: (value) async {
+                                      setState(() => _pending.add(robot.id));
+                                      try {
+                                        await ref
+                                            .read(
+                                              robotsControllerProvider.notifier,
+                                            )
+                                            .setPatrol(
+                                              robotId: robot.id,
+                                              enable: value,
+                                            );
+                                        _registerToggle();
+                                      } on ApiException catch (e) {
+                                        if (!mounted) return;
+                                        if (e.statusCode == 409) {
+                                          showShadDialog(
+                                            context: context,
+                                            builder: (ctx) => ShadDialog.alert(
+                                              title: const Text(
+                                                'El robot aún no está listo',
+                                              ),
+                                              description: const Padding(
+                                                padding: EdgeInsets.only(
+                                                  bottom: 8,
+                                                ),
+                                                child: Text(
+                                                  'El robot todavía está configurándose (mapeando). '
+                                                  'No se puede detener hasta que esté patrullando.',
+                                                ),
+                                              ),
+                                              actions: [
+                                                ShadButton(
+                                                  child: const Text(
+                                                    'Entendido',
+                                                  ),
+                                                  onPressed: () =>
+                                                      Navigator.of(ctx).pop(),
+                                                ),
+                                              ],
+                                            ),
+                                          );
+                                        } else {
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            SnackBar(content: Text(e.message)),
+                                          );
+                                        }
+                                      } catch (e) {
+                                        if (mounted) {
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            SnackBar(
+                                              content: Text('Error: $e'),
+                                            ),
+                                          );
+                                        }
+                                      } finally {
+                                        if (mounted) {
+                                          setState(
+                                            () => _pending.remove(robot.id),
+                                          );
+                                        }
+                                      }
+                                    },
+                                  ),
+                              ],
                             ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
+                          );
+                        },
+                      ),
+              ),
+              Align(
+                alignment: Alignment.bottomLeft,
+                child: Text(
+                  'Last status update: ${_lastUpdateText()}',
+                  style: const TextStyle(fontSize: 14),
+                ),
+              ),
+            ],
           ),
-          Align(
-            alignment: Alignment.bottomLeft,
-            child: Text(
-              'Last status update: ${_lastUpdateText()}',
-              style: const TextStyle(fontSize: 14),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

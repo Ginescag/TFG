@@ -1,8 +1,4 @@
-enum AuthStatus {
-  unknown,
-  unauthenticated,
-  authenticated,
-}
+enum AuthStatus { unknown, unauthenticated, authenticated }
 
 class AuthState {
   final AuthStatus status;
@@ -10,12 +6,7 @@ class AuthState {
   final String? role;
   final int? userId;
 
-  const AuthState({
-    required this.status,
-    this.token,
-    this.role,
-    this.userId,
-  });
+  const AuthState({required this.status, this.token, this.role, this.userId});
 
   const AuthState.unknown() : this(status: AuthStatus.unknown);
 
@@ -26,9 +17,9 @@ class AuthState {
     required String role,
     required int userId,
   }) : this(
-          status: AuthStatus.authenticated,
-          token: token,
-          role: role,
-          userId: userId,
-        );
+         status: AuthStatus.authenticated,
+         token: token,
+         role: role,
+         userId: userId,
+       );
 }

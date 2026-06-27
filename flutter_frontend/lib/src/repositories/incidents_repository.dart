@@ -8,16 +8,36 @@ class IncidentsRepository {
 
   Future<List<Incident>> listIncidents() async {
     final data = await _api.get<List<dynamic>>('/user/incidents');
-    return data.map((item) => Incident.fromJson(item as Map<String, dynamic>)).toList();
+    return data
+        .map((item) => Incident.fromJson(item as Map<String, dynamic>))
+        .toList();
   }
 
   Future<List<Incident>> listByRobot(String robotId) async {
     final data = await _api.get<List<dynamic>>('/user/$robotId/incidents');
-    return data.map((item) => Incident.fromJson(item as Map<String, dynamic>)).toList();
+    return data
+        .map((item) => Incident.fromJson(item as Map<String, dynamic>))
+        .toList();
   }
 
   Future<String> getVideoUrl(String incidentId) async {
-    final data = await _api.get<Map<String, dynamic>>('/user/incidents/$incidentId/show-video');
+    final data = await _api.get<Map<String, dynamic>>(
+      '/user/incidents/$incidentId/show-video',
+    );
     return data['video_url'] as String;
+  }
+
+  Future<Incident> getIncident(String incidentId) async {
+    final data = await _api.get<Map<String, dynamic>>(
+      '/user/incidents/$incidentId',
+    );
+    return Incident.fromJson(data);
+  }
+
+  Future<Incident> markReviewed(String incidentId) async {
+    final data = await _api.put<Map<String, dynamic>>(
+      '/user/incidents/$incidentId/review',
+    );
+    return Incident.fromJson(data);
   }
 }

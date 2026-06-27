@@ -73,6 +73,11 @@ class Incidente(Base):
     # Relationships
     robot = relationship("Robot", back_populates="incidentes")
 
+    @property
+    def robot_alias(self):
+        """Alias del robot asociado, para incluirlo en las respuestas de incidencias."""
+        return self.robot.alias if self.robot else None
+
     # Table arguments to match the performance indexes defined in init.sql
     __table_args__ = (
         Index('idx_incidentes_robot_fecha', 'robot_id', 'created_at'),

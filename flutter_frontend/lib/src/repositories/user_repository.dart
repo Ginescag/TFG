@@ -35,10 +35,7 @@ class UserRepository {
   }) async {
     final data = await _api.put<Map<String, dynamic>>(
       '/user/update-password',
-      data: {
-        'oldPassword': oldPassword,
-        'newPassword': newPassword,
-      },
+      data: {'oldPassword': oldPassword, 'newPassword': newPassword},
     );
     return User.fromJson(data);
   }

@@ -8,19 +8,15 @@ class RobotsRepository {
 
   Future<List<Robot>> listRobots() async {
     final data = await _api.get<List<dynamic>>('/user/robots');
-    return data.map((item) => Robot.fromJson(item as Map<String, dynamic>)).toList();
+    return data
+        .map((item) => Robot.fromJson(item as Map<String, dynamic>))
+        .toList();
   }
 
-  Future<Robot> addRobot({
-    required String id,
-    required String alias,
-  }) async {
+  Future<Robot> addRobot({required String id, required String alias}) async {
     final data = await _api.post<Map<String, dynamic>>(
       '/user/new-robot',
-      data: {
-        'id': id,
-        'alias': alias,
-      },
+      data: {'id': id, 'alias': alias},
     );
     return Robot.fromJson(data);
   }
@@ -30,22 +26,30 @@ class RobotsRepository {
   }
 
   Future<Robot> startPatrol(String robotId) async {
-    final data = await _api.put<Map<String, dynamic>>('/user/$robotId/start-patrol');
+    final data = await _api.put<Map<String, dynamic>>(
+      '/user/$robotId/start-patrol',
+    );
     return Robot.fromJson(data);
   }
 
   Future<Robot> stopPatrol(String robotId) async {
-    final data = await _api.put<Map<String, dynamic>>('/user/$robotId/stop-patrol');
+    final data = await _api.put<Map<String, dynamic>>(
+      '/user/$robotId/stop-patrol',
+    );
     return Robot.fromJson(data);
   }
 
   Future<String> getDashboardUrl(String robotId) async {
-    final data = await _api.get<Map<String, dynamic>>('/user/$robotId/dashboard-url');
+    final data = await _api.get<Map<String, dynamic>>(
+      '/user/$robotId/dashboard-url',
+    );
     return data['url'] as String;
   }
 
   Future<Robot> reinstall(String robotId) async {
-    final data = await _api.put<Map<String, dynamic>>('/user/$robotId/reinstall');
+    final data = await _api.put<Map<String, dynamic>>(
+      '/user/$robotId/reinstall',
+    );
     return Robot.fromJson(data);
   }
 

@@ -20,13 +20,16 @@ class RobotsController extends AsyncNotifier<List<Robot>> {
 
   /// Recarga la lista sin mostrar el spinner de carga (para polling en segundo
   /// plano). Si falla, mantiene los datos actuales en vez de pasar a error.
-  Future<void> silentRefresh() async {
+  /// Devuelve `true` si la recarga tuvo éxito.
+  Future<bool> silentRefresh() async {
     final repo = ref.read(robotsRepositoryProvider);
     try {
       final robots = await repo.listRobots();
       state = AsyncData(robots);
+      return true;
     } catch (_) {
       // Ignorar fallos transitorios del refresco en segundo plano.
+      return false;
     }
   }
 
@@ -42,7 +45,10 @@ class RobotsController extends AsyncNotifier<List<Robot>> {
     await refresh();
   }
 
-  Future<void> setPatrol({required String robotId, required bool enable}) async {
+  Future<void> setPatrol({
+    required String robotId,
+    required bool enable,
+  }) async {
     final repo = ref.read(robotsRepositoryProvider);
     if (enable) {
       await repo.startPatrol(robotId);
@@ -58,7 +64,10 @@ class RobotsController extends AsyncNotifier<List<Robot>> {
     await refresh();
   }
 
-  Future<void> updateAlias({required String robotId, required String alias}) async {
+  Future<void> updateAlias({
+    required String robotId,
+    required String alias,
+  }) async {
     final repo = ref.read(robotsRepositoryProvider);
     await repo.updateAlias(robotId, alias);
     await refresh();

@@ -1,0 +1,72 @@
+\chapter{Objetivos}
+\label{cap:objetivos}
+
+A partir del problema planteado en el Capítulo~\ref{cap:introduccion} y del
+marco revisado en el Capítulo~\ref{cap:marco-teorico}, este capítulo formula el
+objetivo general del trabajo y lo desglosa en una serie de objetivos específicos
+verificables que guían el desarrollo descrito en los capítulos posteriores.
+
+%% =============================================================================
+\section{Objetivo general}
+\label{sec:objetivo-general}
+
+El objetivo general del trabajo es diseñar e implementar un sistema
+robótico de patrulla autónoma para estancias cerradas que cartografíe el
+entorno, lo recorra de forma autónoma, detecte la presencia de personas como
+incidencia y la notifique a una plataforma centralizada con la que el usuario
+interactúe, todo ello articulado mediante una arquitectura orientada a eventos
+que desacople la capa robótica del plano de control.
+
+%% =============================================================================
+\section{Objetivos específicos}
+\label{sec:objetivos-especificos}
+
+Para alcanzar el objetivo general se definen los siguientes objetivos
+específicos:
+
+\begin{enumerate}
+  \item \textbf{OE1. Cartografía autónoma del entorno.} Dotar al robot de la
+    capacidad de explorar de forma autónoma una estancia desconocida, construir
+    su mapa mediante \gls{slam} y almacenarlo para su uso posterior.
+
+  \item \textbf{OE2. Generación y ejecución de la ruta de patrulla.} Derivar del
+    mapa una ruta de cobertura del espacio libre y recorrerla de manera cíclica
+    con la pila de navegación \gls{nav2}, evitando obstáculos.
+
+  \item \textbf{OE3. Orquestación del ciclo de patrulla.} Diseñar un orquestador,
+    en forma de una máquina de estados finita (\acrshort{fsm}), que coordine las
+    fases del ciclo operativo del robot (exploración y mapeado, planificación de
+    la ruta, patrulla y retorno al punto de carga), de modo que el robot encadene
+    de forma autónoma las capacidades anteriores.
+
+  \item \textbf{OE4. Percepción y detección de incidencias en el entorno.}
+    Integrar un módulo de visión por computador basado en \gls{yolo} que detecte
+    personas durante la patrulla, grabe un clip del evento y lo registre como
+    incidencia.
+
+  \item \textbf{OE5. Arquitectura orientada a eventos.} Diseñar el sistema de
+    comunicación basado en un bus de mensajería que desacople el robot del
+    backend y canalice la telemetría, las incidencias y los comandos de control.
+
+  \item \textbf{OE6. Backend y persistencia de datos.} Desarrollar un servicio
+    de backend que consuma los eventos del robot, exponga una \gls{api}
+    \gls{rest} y persista la información en los almacenes adecuados, incluyendo
+    el vídeo de las incidencias y las series temporales de telemetría.
+
+  \item \textbf{OE7. Seguridad y autenticación.} Implementar un mecanismo de
+    autenticación tanto para el robot, mediante un esquema de confianza en el
+    primer uso (\gls{tofu}) y tokens \gls{jwt}, como para los usuarios, con
+    control de acceso basado en roles.
+
+  \item \textbf{OE8. Aplicación de usuario.} Desarrollar una aplicación
+    multiplataforma con \mbox{Flutter} desde la que el usuario controle la
+    patrulla del robot y consulte el historial de incidencias y la telemetría.
+
+  \item \textbf{OE9. Integración y validación funcional.} Integrar todos los
+    subsistemas en una solución desplegable mediante contenedores y comprobar su
+    funcionamiento conjunto.
+\end{enumerate}
+
+El grado de consecución de cada uno de estos objetivos se valora en el
+Capítulo~\ref{cap:conclusiones}, a la luz de los resultados presentados en el
+Capítulo~\ref{cap:resultados}.

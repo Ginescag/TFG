@@ -45,7 +45,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   Future<void> _updateInfo() async {
     setState(() => _updating = true);
     try {
-      await ref.read(userRepositoryProvider).updateInfo(
+      await ref
+          .read(userRepositoryProvider)
+          .updateInfo(
             nombre: _nameController.text.trim(),
             email: _emailController.text.trim(),
             password: _passwordController.text.trim(),
@@ -54,9 +56,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 : _phoneController.text.trim(),
           );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Profile updated')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Profile updated')));
         ref.refresh(profileProvider);
       }
     } on ApiException catch (e) {
@@ -71,16 +73,18 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   Future<void> _updatePassword() async {
     setState(() => _updating = true);
     try {
-      await ref.read(userRepositoryProvider).updatePassword(
+      await ref
+          .read(userRepositoryProvider)
+          .updatePassword(
             oldPassword: _oldPasswordController.text.trim(),
             newPassword: _newPasswordController.text.trim(),
           );
       if (mounted) {
         _oldPasswordController.clear();
         _newPasswordController.clear();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Password updated')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Password updated')));
       }
     } on ApiException catch (e) {
       _showError(e.message);
@@ -92,9 +96,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   }
 
   void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override

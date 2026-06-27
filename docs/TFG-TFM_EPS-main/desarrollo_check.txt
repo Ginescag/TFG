@@ -1,0 +1,1768 @@
+                                               Escuela
+                                               Politécnica
+                                               Superior
+
+
+Sistema robótico
+inteligente para la
+patrulla y detección de
+incidencias en estancias
+cerradas
+             Grado en Ingeniería Informática
+
+
+
+
+Trabajo Fin de Grado
+Autor:
+Ginés Caballero Guijarro
+
+Tutor:
+Francisco Antonio Pujol López
+
+Julio 2026
+Sistema robótico inteligente para la patrulla
+   y detección de incidencias en estancias
+                  cerradas
+
+ Navegación autónoma y detección de incidencias con ROS 2, visión por
+            computador y arquitectura orientada a eventos
+
+
+
+
+                                  Autor
+                          Ginés Caballero Guijarro
+
+                                  Tutor
+                       Francisco Antonio Pujol López
+                     Tecnología Informática y Computación
+
+
+
+
+                      Grado en Ingeniería Informática
+
+
+
+                   Escuela
+                   Politécnica
+                   Superior
+
+
+                          ALICANTE, Julio 2026
+Preámbulo
+  La vigilancia de espacios interiores cerrados (oficinas, naves, almacenes o viviendas) recae
+habitualmente en cámaras fijas y en la supervisión humana, dos recursos con cobertura li-
+mitada y elevado coste de atención continuada. La robótica móvil de servicio, unida a los
+avances recientes en visión por computador, abre la posibilidad de automatizar esta tarea
+mediante un agente capaz de recorrer el entorno de forma autónoma y de avisar únicamente
+cuando detecta una situación relevante. El presente Trabajo Fin de Grado se enmarca en este
+contexto y propone el diseño y la implementación de un sistema robótico de patrulla autóno-
+ma para interiores, construido sobre un robot TurtleBot 4 y Robot Operating System 2 (ROS
+2), que cartografía el espacio, lo recorre siguiendo una ruta de cobertura, detecta la presencia
+de personas mediante una red neuronal de detección de objetos y notifica las incidencias a
+una plataforma centralizada con la que el usuario interactúa desde una aplicación móvil. El
+objetivo general es demostrar la viabilidad de una arquitectura desacoplada y orientada a
+eventos que integre la capa robótica, el procesamiento a bordo del robot y los servicios web
+en un único sistema funcional, extensible y seguro.
+
+
+
+
+                                                                                              v
+Agradecimientos
+  En primer lugar, quiero agradecer a mi tutor, Francisco Antonio Pujol López, su orientación
+y su disponibilidad durante el desarrollo de este trabajo.
+  A mis padres y a mi pareja María, por confiar siempre en mí, incluso cuando yo no lo hacía.
+  A mis amigos Alejandro, Miguel, Nicolás, Juan, Raúl Luján y Raúl Ruiz, por el apoyo
+constante a lo largo de estos años y ser un pilar importantísimo en mi historia como ingeniero.
+  Finalmente, agradecer a la Escuela Politécnica Superior de la Universidad de Alicante la
+inestimable formación recibida durante el grado.
+
+
+
+
+                                                                                            vii
+                                                      A mi familia y pareja,
+por su apoyo incondicional y por mantenerme siempre con los pies en la tierra.
+                                 “Solo podemos ver poco del futuro,
+pero lo suficiente para darnos cuenta de que hay mucho por hacer.”
+
+                                                  Alan Turing, 1950
+Resumen
+   La vigilancia de espacios interiores cerrados depende en gran medida de cámaras fijas y de
+supervisión humana, soluciones de cobertura limitada y atención costosa. Este trabajo abor-
+da la automatización de dicha tarea mediante un robot móvil capaz de patrullar de forma
+autónoma y de alertar solo ante eventos relevantes. Para ello se ha diseñado e implementado
+un sistema completo sobre un robot TurtleBot 4 y ROS 2, organizado como un monorepo con
+cuatro bloques: la capa robótica, una infraestructura de datos en contenedores, un servicio
+de backend y una aplicación de usuario. El robot construye el mapa del entorno mediante
+Simultaneous Localization and Mapping (SLAM), genera una ruta de cobertura a partir de
+dicho mapa y la recorre con la pila de navegación ROS 2 Navigation Stack (Nav2), mientras
+un nodo de percepción basado en You Only Look Once (YOLO) detecta personas y registra
+las incidencias. La comunicación entre el robot y el servidor se resuelve con una arquitectura
+orientada a eventos basada en un bus de mensajería, lo que desacopla el hardware del plano
+de control y reduce el sondeo de red. El backend, desarrollado con FastAPI, consume estos
+eventos, persiste los datos y expone una Application Programming Interface (API) Represen-
+tational State Transfer (REST) consumida por una aplicación Flutter desde la que el usuario
+controla la patrulla y revisa los incidentes. Los resultados presentados son de carácter preli-
+minar y se centran en la validación funcional de la arquitectura; no obstante, el sistema sienta
+una base sólida y extensible para el desarrollo de soluciones de vigilancia robótica autónoma.
+   Palabras clave: robótica móvil, ROS 2, navegación autónoma, visión por computador,
+arquitectura orientada a eventos, vigilancia.
+
+
+
+
+                                                                                            xiii
+Índice general
+
+Preámbulo                                                                                         v
+
+Agradecimientos                                                                                 vii
+
+Resumen                                                                                         xiii
+
+1. Introducción                                                                                   1
+   1.1. Importancia y actualidad de la temática . . . . . . . . . . . . . . . . . . . . .         1
+   1.2. Planteamiento del problema . . . . . . . . . . . . . . . . . . . . . . . . . . . .        1
+   1.3. Propósito y finalidad del trabajo . . . . . . . . . . . . . . . . . . . . . . . . .       2
+   1.4. Estructura de la memoria . . . . . . . . . . . . . . . . . . . . . . . . . . . . .        2
+
+2. Marco teórico                                                                                  3
+   2.1. Robótica móvil autónoma y ROS 2 . . . . . . . . . . . . . . . . . . . . . . . .           3
+   2.2. Localización y mapeado simultáneos (SLAM) . . . . . . . . . . . . . . . . . .             4
+   2.3. Navegación autónoma y planificación de rutas de cobertura . . . . . . . . . .             4
+   2.4. Visión por computador y detección de objetos . . . . . . . . . . . . . . . . . .          5
+   2.5. Arquitecturas orientadas a eventos . . . . . . . . . . . . . . . . . . . . . . . .        5
+   2.6. Trabajos relacionados . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .       6
+   2.7. Síntesis y posicionamiento . . . . . . . . . . . . . . . . . . . . . . . . . . . . .      7
+
+3. Objetivos                                                                                      9
+   3.1. Objetivo general . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .      9
+   3.2. Objetivos específicos . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .     9
+
+4. Metodología                                                                                  11
+   4.1. Metodología de desarrollo . . . . . . . . . . . . . . . . . . . . . . . . . . . . .     11
+   4.2. Herramientas, frameworks y entornos . . . . . . . . . . . . . . . . . . . . . . .       11
+        4.2.1. Plataforma robótica y navegación . . . . . . . . . . . . . . . . . . . . .       12
+        4.2.2. Percepción visual . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .    12
+        4.2.3. Mensajería orientada a eventos . . . . . . . . . . . . . . . . . . . . . .       13
+        4.2.4. Backend y servicios web . . . . . . . . . . . . . . . . . . . . . . . . . .      13
+        4.2.5. Persistencia, almacenamiento y visualización . . . . . . . . . . . . . .         13
+        4.2.6. Aplicación de usuario . . . . . . . . . . . . . . . . . . . . . . . . . . .      13
+        4.2.7. Infraestructura y despliegue . . . . . . . . . . . . . . . . . . . . . . . .     14
+        4.2.8. Entorno de desarrollo y herramientas de apoyo . . . . . . . . . . . . .          14
+        4.2.9. Bibliotecas y dependencias principales . . . . . . . . . . . . . . . . . .       14
+   4.3. Criterios y métricas de evaluación . . . . . . . . . . . . . . . . . . . . . . . . .    16
+
+
+
+                                                                                                xv
+xvi                                                                               Índice general
+
+
+5. Desarrollo                                                                                    17
+   5.1. Vista general y flujos de datos . . . . . . . . . . . . . . . . . . . . . . . . . . .    17
+        5.1.1. Cliente → servidor → robot: control de la patrulla . . . . . . . . . . .          18
+        5.1.2. Robot → servidor → cliente: telemetría, incidencias y estado . . . . .            18
+        5.1.3. Autenticación y arranque: TOFU y JWT . . . . . . . . . . . . . . . .              18
+   5.2. Arquitectura e infraestructura . . . . . . . . . . . . . . . . . . . . . . . . . . .     19
+   5.3. Backend . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .    20
+        5.3.1. Modelo de datos . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .       20
+        5.3.2. API REST . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .        20
+        5.3.3. Consumidores y productor de eventos . . . . . . . . . . . . . . . . . .           21
+        5.3.4. Seguridad . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .     22
+   5.4. Capa robótica . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .    22
+        5.4.1. Orquestador: patrol_nav . . . . . . . . . . . . . . . . . . . . . . . . .         23
+        5.4.2. Detección: detect_incident . . . . . . . . . . . . . . . . . . . . . . . .        24
+        5.4.3. Telemetría: serve_telemetry . . . . . . . . . . . . . . . . . . . . . . . .       25
+        5.4.4. Gestión de secretos: secret_helper . . . . . . . . . . . . . . . . . . . .        25
+   5.5. Aplicación de usuario . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .      25
+
+6. Resultados                                                                                    27
+   6.1. Entorno y escenario de pruebas . . . . . . . . . . . . . . . . . . . . . . . . . .       27
+   6.2. Validación funcional . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .     27
+   6.3. Métricas previstas y estado de la medición . . . . . . . . . . . . . . . . . . . .       27
+   6.4. Discusión . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .    27
+
+7. Conclusiones                                                                                  29
+   7.1. Grado de consecución de los objetivos . . . . . . . . . . . . . . . . . . . . . .        29
+   7.2. Aportaciones . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .     29
+   7.3. Limitaciones . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .   29
+   7.4. Trabajo futuro . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .     30
+   7.5. Valoración personal . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .    30
+
+Bibliografía                                                                                     31
+
+Lista de Acrónimos y Abreviaturas                                                                33
+
+Glosario de Términos                                                                             35
+
+A. Manual de despliegue                                                                          39
+   A.1. Requisitos previos . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .     39
+   A.2. Procedimiento de despliegue . . . . . . . . . . . . . . . . . . . . . . . . . . . .      39
+   A.3. Configuración mediante variables de entorno . . . . . . . . . . . . . . . . . . .        40
+Índice de figuras
+  5.1.   Arquitectura del sistema por capas . . . . . . . . . . . . . . . . . . . . . .    17
+
+
+
+
+                                                                                          xvii
+Índice de tablas
+  4.1.    Principales tecnologías empleadas por capa del sistema. Fuente: elaboración
+       propia. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .   12
+  4.2.     Bibliotecas y dependencias principales, su función y el componente en el
+       que se emplean. Fuente: elaboración propia. . . . . . . . . . . . . . . . . . . .         15
+
+  5.1.     Resumen de los flujos de datos del sistema. Fuente: elaboración propia. . 19
+  5.2.     Servicios de infraestructura y puertos publicados. Fuente: elaboración propia. 19
+  5.3.     Endpoints de la API REST . . . . . . . . . . . . . . . . . . . . . . . . . . 21
+  5.4.     Nodos ROS 2 propios del sistema. Fuente: elaboración propia. . . . . . . . 23
+  5.5.     Estados de la máquina de estados de patrol_nav. Fuente: elaboración propia. 23
+
+  6.1.      Plantilla de métricas de evaluación previstas. Fuente: elaboración propia.           28
+
+
+
+
+                                                                                                 xix
+Índice de Códigos
+ 5.1.   YAML . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .   20
+ 5.2.   Python . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .   22
+ 5.3.   Python . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .   24
+ 5.4.   Python . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .   24
+ 5.5.   Python . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .   25
+
+ A.1. Bash . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .   39
+ A.2. Bash . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .   40
+
+
+
+
+                                                                                               xxi
+1. Introducción
+  La protección y la supervisión de espacios interiores son una necesidad constante en en-
+tornos tan diversos como oficinas, naves industriales, almacenes o viviendas. Este capítulo
+enmarca el trabajo en ese ámbito: se argumenta la importancia y la actualidad del problema,
+se delimita el reto técnico que se aborda y se enuncia el propósito del presente Trabajo Fin
+de Grado, para terminar describiendo la organización de la memoria.
+
+
+1.1. Importancia y actualidad de la temática
+   La vigilancia de espacios interiores cerrados se apoya tradicionalmente en redes de cáma-
+ras fijas y en la supervisión por parte de personal de seguridad. Ambos recursos presentan
+limitaciones conocidas: las cámaras fijas solo cubren los ángulos en los que se han instalado y
+dejan zonas ciegas, y la atención humana sostenida sobre múltiples monitores resulta costosa
+y propensa a la fatiga. Como consecuencia, una parte de los eventos relevantes puede pasar
+inadvertida o detectarse con retraso, justo cuando una respuesta temprana es más valiosa.
+   El interés por automatizar esta tarea es especialmente vigente hoy en día. En los últimos
+años, la robótica móvil ha alcanzado un grado de madurez que permite delegar parte de la
+vigilancia en plataformas autónomas: la consolidación de ROS 2 como middleware estándar
+para el desarrollo de aplicaciones robóticas, con despliegues reales documentados (Macenski
+et al., 2022), junto con la aparición de pilas de navegación robustas (Macenski et al., 2020)
+y de hardware asequible, ha rebajado de forma notable la barrera de entrada. De manera
+complementaria, los detectores de objetos en tiempo real basados en redes neuronales con-
+volucionales (Redmon et al., 2016), hoy disponibles en implementaciones eficientes y de uso
+extendido (Jocher et al., 2023), hacen viable dotar a un robot de una capacidad de percepción
+suficiente para identificar situaciones de interés mientras se desplaza.
+   La convergencia de ambos avances habilita un modelo de vigilancia activa, en el que un
+agente móvil recorre el espacio de forma autónoma y reclama la atención del operador única-
+mente ante los eventos que detecta. Frente al esquema pasivo de la cámara fija, este enfoque
+amplía la cobertura efectiva con un único dispositivo en movimiento y filtra la información
+que llega al usuario. Es en esta ventana de oportunidad donde se sitúa el presente trabajo.
+
+
+1.2. Planteamiento del problema
+   Construir un robot de patrulla autónoma para interiores no constituye un problema único,
+sino la integración coordinada de varios subproblemas. El robot debe cartografiar un entorno
+inicialmente desconocido, planificar una ruta que cubra el espacio de forma razonable (Gal-
+ceran & Carreras, 2013), navegar evitando obstáculos, percibir la presencia de personas y
+comunicar las incidencias a un sistema con el que el usuario pueda interactuar. Cada una
+de estas capacidades descansa en tecnologías distintas (navegación, percepción, mensajería,
+servicios web y aplicaciones de usuario) que rara vez comparten el mismo plano de ejecución.
+
+
+
+                                                                                             1
+2                                                                                Introducción
+
+
+   El reto principal, por tanto, no es resolver cada subproblema de manera aislada, sino
+integrarlos en un sistema coherente que sea a la vez funcional, seguro y mantenible. Un
+acoplamiento excesivo entre el robot y el servidor, en el que cada extremo depende de la
+disponibilidad inmediata del otro, penalizaría la escalabilidad y la robustez del sistema y
+elevaría el consumo de recursos de una plataforma con autonomía energética limitada. De
+ahí la necesidad de crear una arquitectura que desacople la capa física del robot del plano de
+control y de los servicios de usuario.
+
+
+1.3. Propósito y finalidad del trabajo
+  El propósito de este Trabajo Fin de Grado es diseñar e implementar un sistema robótico de
+patrulla autónoma para estancias cerradas que dé respuesta al problema anterior, construido
+sobre un robot TurtleBot 4 y ROS 2. El sistema cartografía el entorno mediante SLAM,
+deriva del mapa resultante una ruta de cobertura y la recorre con la pila de navegación Nav2.
+Durante el recorrido, un módulo de percepción basado en YOLO detecta la presencia de
+personas, graba un clip del evento y lo registra como incidencia.
+  La finalidad última no es solo que el robot patrulle, sino demostrar la viabilidad de una
+arquitectura distribuida y orientada a eventos que integre la capa robótica, el procesamiento a
+bordo y los servicios web en un único sistema funcional, extensible y seguro. La comunicación
+entre el robot y el resto del sistema se resuelve mediante un bus de mensajería (Kreps et al.,
+2011) que desacopla el hardware del backend, de modo que el robot solo transmite información
+cuando se produce un evento relevante. Un servidor desarrollado con FastAPI consume estos
+eventos, persiste la información y expone una API REST que una aplicación Flutter emplea
+para que el usuario controle la patrulla y revise el historial de incidencias. El proyecto se
+organiza en cuatro bloques diferenciados (capa robótica, infraestructura de datos, backend y
+aplicación de usuario) desplegables mediante contenedores.
+
+
+1.4. Estructura de la memoria
+   El resto del documento se organiza como sigue. El Capítulo 2 revisa los fundamentos teóri-
+cos y el estado del arte en navegación autónoma, percepción visual y arquitecturas orientadas
+a eventos. El Capítulo 3 formula el objetivo general y los objetivos específicos del trabajo. El
+Capítulo 4 describe la metodología de desarrollo, las herramientas empleadas y los criterios
+de evaluación previstos. El Capítulo 5 constituye el núcleo técnico de la memoria y detalla
+la arquitectura del sistema y la implementación de cada uno de sus subsistemas. El Capí-
+tulo 6 presenta los resultados obtenidos y su análisis. Finalmente, el Capítulo 7 recoge las
+conclusiones, las limitaciones detectadas y las líneas de trabajo futuro.
+2. Marco teórico
+
+   Este capítulo presenta los fundamentos teóricos sobre los que se sustenta el trabajo y revisa
+el estado del arte de las disciplinas implicadas. Se abordan, en primer lugar, el middleware
+robótico y el problema de la localización y el mapeado; a continuación, la navegación autóno-
+ma y la planificación de rutas de cobertura; después, la detección de objetos mediante visión
+por computador; y, por último, las arquitecturas orientadas a eventos. El capítulo concluye
+situando la propuesta respecto a los trabajos relacionados.
+
+
+2.1. Robótica móvil autónoma y ROS 2
+   ROS 2 es un middleware de código abierto para el desarrollo de aplicaciones robóticas
+que proporciona un modelo de comunicación entre procesos, herramientas de construcción
+y un ecosistema amplio de paquetes reutilizables. Su primera generación se introdujo con
+el objetivo de favorecer la reutilización de software en investigación robótica (Quigley et
+al., 2009). Sin embargo, su diseño, articulado en torno a un nodo maestro que coordinaba
+el descubrimiento entre procesos, presentaba limitaciones para los entornos de producción,
+los sistemas con varios robots y las aplicaciones con requisitos de tiempo real. La segunda
+generación, ROS 2, rediseña la arquitectura para superar esas carencias: elimina el maestro
+centralizado y delega el descubrimiento y el transporte de mensajes en el estándar Data
+Distribution Service (DDS), lo que aporta una comunicación descentralizada, control de la
+calidad de servicio de los enlaces y mejor soporte para despliegues distribuidos (Macenski
+et al., 2022).
+   El modelo de programación de ROS 2 se organiza en torno a nodos, procesos independientes
+que encapsulan una funcionalidad concreta y se comunican mediante el paso de mensajes.
+Los nodos intercambian flujos de datos a través de topics con un patrón de publicación-
+suscripción, invocan operaciones puntuales mediante servicios de tipo petición-respuesta y
+gestionan tareas de larga duración, con realimentación y posibilidad de cancelación, mediante
+acciones. Sobre el transporte DDS, cada enlace puede ajustar parámetros de calidad de
+servicio, como la fiabilidad de la entrega o la persistencia de los últimos valores publicados,
+lo que permite adaptar la comunicación tanto a sensores de alta frecuencia como a eventos
+esporádicos.
+   Más allá del modelo de comunicación, ROS 2 ofrece un sistema de construcción y empa-
+quetado, un mecanismo de parámetros para configurar los nodos en tiempo de ejecución y
+un sistema de lanzamiento que describe cómo arrancar y orquestar conjuntos de nodos. Esta
+separación en componentes débilmente acoplados favorece la modularidad, permite reutilizar
+paquetes mantenidos por la comunidad y hace posible sustituir una pieza sin alterar el res-
+to del sistema. El diseño de este trabajo sigue ese principio de forma explícita, donde cada
+capacidad del robot (telemetría, percepción, navegación, distribución de secretos y patrulla)
+reside en un nodo especializado y encapsulado.
+
+
+
+                                                                                              3
+4                                                                             Marco teórico
+
+
+2.2. Localización y mapeado simultáneos (SLAM)
+   Para navegar de forma autónoma, un robot necesita conocer tanto el mapa del entorno
+como su propia posición dentro de él. Cuando ninguno de los dos es conocido de antemano,
+el problema se formula como localización y mapeado simultáneos, o SLAM: la construcción
+incremental de un mapa de un entorno desconocido a la vez que se estima la trayectoria del
+robot (Durrant-Whyte & Bailey, 2006). Se trata de un problema fundamental en robótica
+móvil porque ambas estimaciones son interdependientes, ya que un buen mapa requiere co-
+nocer la posición y una buena posición requiere conocer el mapa, y porque los errores de
+odometría se acumulan a lo largo del recorrido y producen deriva si no se corrigen.
+   Una solución de SLAM suele descomponerse en dos partes. El componente frontal procesa
+las medidas de los sensores y resuelve la asociación de datos, esto es, reconocer qué obser-
+vaciones corresponden a un mismo elemento del entorno; el componente posterior estima la
+trayectoria y el mapa más coherentes con esas observaciones. La detección de cierres de bu-
+cle, que identifica lugares ya visitados, es determinante para corregir la deriva acumulada.
+Históricamente, las primeras formulaciones se apoyaban en filtros recursivos, como el filtro
+de Kalman extendido, mientras que los enfoques predominantes en la actualidad plantean el
+problema como la optimización de un grafo de poses, más preciso y escalable para trayectorias
+largas.
+   Según el sensor empleado, se distingue entre el SLAM visual, basado en cámaras, y el
+SLAM láser, basado en un sensor Light Detection and Ranging (LiDAR) que mide distancias
+mediante haces de luz. En el ámbito de ROS 2, una de las soluciones más extendidas para
+interiores es slam_toolbox, que implementa SLAM láser basado en grafos de poses y permite
+tanto el mapeado en línea como la posterior localización sobre el mapa generado, además de
+guardar y recargar mapas previamente construidos (Macenski & Jambrecic, 2021). El presente
+trabajo emplea este enfoque para que el robot construya el mapa de la estancia durante una
+fase inicial de exploración.
+
+
+2.3. Navegación autónoma y planificación de rutas de cobertura
+   Una vez disponible el mapa, la navegación autónoma consiste en planificar y ejecutar
+trayectorias seguras hacia los objetivos deseados evitando obstáculos. En ROS 2, esta funcio-
+nalidad la proporciona Nav2, una pila de navegación que integra un planificador global, un
+controlador local y un conjunto de comportamientos de recuperación, coordinados mediante
+árboles de comportamiento (behavior trees) (Macenski et al., 2020). El planificador global cal-
+cula una ruta hasta el objetivo sobre una representación del entorno conocida como mapa de
+costes (costmap), que combina los obstáculos del mapa con una zona de inflado de seguridad
+alrededor de ellos; el controlador local genera las órdenes de velocidad que siguen esa ruta
+mientras esquiva obstáculos imprevistos; y los comportamientos de recuperación intervienen
+cuando el robot queda bloqueado.
+   El empleo de árboles de comportamiento, en lugar de una máquina de estados fija, dota a la
+navegación de una lógica de decisión modular y fácil de modificar, en la que pueden añadirse
+o reordenarse comportamientos sin reescribir el sistema. Nav2 expone, además, interfaces de
+alto nivel para enviar al robot a una pose objetivo o a través de una secuencia ordenada de
+poses, una capacidad especialmente adecuada para las tareas de patrulla, en las que el robot
+2.4. Visión por computador y detección de objetos                                              5
+
+
+debe recorrer una lista de puntos predefinidos.
+   El recorrido sistemático de un espacio se corresponde con el problema de planificación
+de rutas de cobertura (coverage path planning), que busca una trayectoria que haga pasar
+al robot por todas las regiones accesibles del entorno (Galceran & Carreras, 2013). Existen
+múltiples estrategias, desde las descomposiciones celulares, que dividen el espacio en regiones
+simples recorridas en barridos de ida y vuelta (boustrophedon), hasta los métodos basados
+en rejilla o en árboles de expansión, y la elección entre ellas responde al compromiso en-
+tre completitud de la cobertura, longitud de la ruta y coste de cálculo. En este trabajo se
+adopta una aproximación sencilla basada en una rejilla de puntos sobre el espacio libre del
+mapa, recorrida en zig-zag, que resulta suficiente para cubrir estancias cerradas de tamaño
+moderado.
+
+
+2.4. Visión por computador y detección de objetos
+   La detección de objetos consiste en localizar y clasificar las instancias de interés presentes
+en una imagen, devolviendo para cada una un recuadro delimitador (bounding box) y una
+categoría con su grado de confianza. Los métodos modernos se apoyan en redes neuronales
+convolucionales (Convolutional Neural Network (CNN)), capaces de aprender directamente de
+los datos las características visuales relevantes. Tradicionalmente se distinguen dos familias:
+los detectores de dos etapas, como Region-based Convolutional Neural Network (R-CNN),
+que primero proponen regiones candidatas y después las clasifican, con alta precisión pero
+mayor coste computacional; y los detectores de una sola etapa, que resuelven la localización
+y la clasificación en una única pasada sobre la imagen.
+   La familia YOLO pertenece a esta segunda categoría y supuso un avance decisivo al plan-
+tear la detección como un único problema de regresión sobre la imagen completa, dividida
+en una rejilla en la que cada celda predice recuadros y probabilidades de clase, lo que per-
+mitió alcanzar velocidades adecuadas para el procesamiento en tiempo real (Redmon et al.,
+2016). Un paso posterior de supresión (non-maximum suppression) descarta las detecciones
+redundantes que se solapan sobre un mismo objeto. A lo largo de sucesivas versiones, YOLO
+ha mejorado la precisión y la eficiencia y ha reducido el tamaño de los modelos.
+   Para su despliegue en plataformas con recursos limitados resulta habitual emplear las
+variantes más ligeras, que ofrecen un compromiso favorable entre precisión y coste compu-
+tacional, frente a las variantes mayores que requieren una Graphics Processing Unit (GPU)
+potente. En este trabajo se utiliza la versión nano de YOLO en su implementación de Ultraly-
+tics (Jocher et al., 2023), ejecutada en el propio robot para detectar la presencia de personas
+durante la patrulla. Este procesamiento en el propio robot (edge computing) evita transmitir
+vídeo de forma continua a un servidor, reduce la carga de red y favorece la privacidad, al
+analizar las imágenes en el propio dispositivo.
+
+
+2.5. Arquitecturas orientadas a eventos
+  En los sistemas distribuidos, una arquitectura orientada a eventos organiza la comunicación
+en torno a la producción y el consumo de eventos a través de un intermediario de mensajería
+(broker), en lugar de mediante llamadas directas entre componentes. Un evento es un registro
+inmutable de algo que ha sucedido, por ejemplo una lectura de telemetría o la detección de una
+6                                                                             Marco teórico
+
+
+incidencia. Este patrón desacopla a los productores de los consumidores: ambos desconocen
+su existencia mutua y se comunican únicamente a través del bus, de modo que añadir un
+nuevo consumidor no obliga a modificar al productor.
+   Una de las plataformas de referencia para este propósito es Apache Kafka. Utilizado por
+empresas como Netflix, Spotify o Uber, Kafka es un sistema de mensajería distribuido y per-
+sistente diseñado para procesar grandes volúmenes de flujos de datos con baja latencia (Kreps
+et al., 2011). Kafka organiza los eventos en topics, que a su vez se reparten en particiones
+para escalar de forma horizontal, y conserva los mensajes en un registro durante un periodo
+configurable. Esta persistencia permite que distintos consumidores lean el mismo flujo a su
+propio ritmo, e incluso reprocesen eventos pasados, una propiedad difícil de obtener con una
+comunicación síncrona y efímera.
+   Este enfoque resulta especialmente adecuado para un robot de patrulla. Al publicar la
+telemetría y las incidencias como eventos, el robot solo transmite información cuando se
+produce algo relevante y no necesita mantener conexiones síncronas con el servidor ni esperar
+su respuesta, lo que reduce el consumo y mejora la tolerancia a desconexiones temporales.
+El servidor, por su parte, consume estos eventos a su propio ritmo y los distribuye al resto
+de la plataforma. Frente a un modelo basado únicamente en peticiones REST, en el que el
+cliente debe preguntar de forma repetida por las novedades, el bus de eventos invierte el flujo
+y reparte mejor la carga. Este desacoplamiento es uno de los pilares del diseño propuesto.
+
+
+2.6. Trabajos relacionados
+   La vigilancia mediante robots móviles autónomos cuenta con una trayectoria consolidada
+en la literatura. Ya en propuestas tempranas se integraban el mapeado, la localización y
+la navegación autónoma con tareas propias de la vigilancia, como la detección de objetos
+abandonados o el seguimiento de personas (Di Paola et al., 2010). Estos sistemas demostraron
+la viabilidad de delegar la inspección de un entorno interior en una plataforma autónoma y
+sentaron las bases sobre las que se apoyan los trabajos posteriores.
+   Las propuestas más recientes incorporan el aprendizaje profundo para la percepción y se
+construyen sobre ROS 2. Existen robots de patrulla que combinan SLAM láser con cámaras
+RGB-D y emplean detectores de la familia YOLO para generar mapas semánticos y evitar
+obstáculos durante el recorrido (Chiang & Huang, 2026). En la línea de la detección de
+intrusos, otras propuestas despliegan flotas de robots coordinados bajo ROS 2, equipados
+con sensores LiDAR bidimensionales, que agregan sus detecciones en un nodo central (Islam
+et al., 2020). Estos trabajos confirman la idoneidad de la combinación de ROS 2, SLAM y
+detección basada en redes neuronales, que también adopta el presente trabajo.
+   No obstante, la mayoría de estas soluciones concentran su esfuerzo en la propia plataforma
+robótica, es decir, en la navegación y la percepción, y tratan de forma secundaria, cuando
+no omiten, la integración con servicios web, la persistencia y la gestión de las incidencias y
+la interacción con el usuario final a través de una aplicación. Muchas son, además, sistemas
+cerrados o difíciles de reproducir.
+   La propuesta de este trabajo se diferencia por abordar el sistema de forma integral y con
+tecnologías abiertas: cubre desde la cartografía y la patrulla autónoma hasta la notificación
+de incidencias y su consulta desde una aplicación móvil, articulando todo ello mediante una
+arquitectura orientada a eventos. Esta visión de extremo a extremo, más que la novedad de
+2.7. Síntesis y posicionamiento                                                              7
+
+
+cada componente por separado, constituye la aportación principal.
+
+
+2.7. Síntesis y posicionamiento
+   A lo largo del capítulo se han revisado tanto los fundamentos que sustentan el trabajo,
+ROS 2 como middleware, el SLAM para el mapeado, Nav2 para la navegación, la detección
+de objetos con YOLO para la percepción y las arquitecturas orientadas a eventos para la
+comunicación, como los trabajos previos que abordan problemas afines. Cada una de esas
+tecnologías constituye una pieza madura y consolidada en su ámbito, y los sistemas de vi-
+gilancia robótica existentes confirman su aplicabilidad conjunta. Frente a esos trabajos, que
+suelen detenerse en la plataforma robótica, el valor del presente reside en integrar todas esas
+piezas, junto con el servidor y la aplicación de usuario, en un único sistema funcional de
+extremo a extremo, cuyo diseño y construcción se detallan en el Capítulo 5, tras formular los
+objetivos en el Capítulo 3.
+3. Objetivos
+  A partir del problema planteado en el Capítulo 1 y del marco revisado en el Capítulo 2,
+este capítulo formula el objetivo general del trabajo y lo desglosa en una serie de objetivos
+específicos verificables que guían el desarrollo descrito en los capítulos posteriores.
+
+
+3.1. Objetivo general
+  El objetivo general del trabajo es diseñar e implementar un sistema robótico de patrulla
+autónoma para estancias cerradas que cartografíe el entorno, lo recorra de forma autónoma,
+detecte la presencia de personas como incidencia y la notifique a una plataforma centralizada
+con la que el usuario interactúe, todo ello articulado mediante una arquitectura orientada a
+eventos que desacople la capa robótica del plano de control.
+
+
+3.2. Objetivos específicos
+  Para alcanzar el objetivo general se definen los siguientes objetivos específicos:
+
+  1. OE1. Cartografía autónoma del entorno. Dotar al robot de la capacidad de explo-
+     rar de forma autónoma una estancia desconocida, construir su mapa mediante SLAM
+     y almacenarlo para su uso posterior.
+
+  2. OE2. Generación y ejecución de la ruta de patrulla. Derivar del mapa una ruta
+     de cobertura del espacio libre y recorrerla de manera cíclica con la pila de navegación
+     Nav2, evitando obstáculos.
+
+  3. OE3. Orquestación del ciclo de patrulla. Diseñar un orquestador, en forma de una
+     máquina de estados finita (FSM), que coordine las fases del ciclo operativo del robot
+     (exploración y mapeado, planificación de la ruta, patrulla y retorno al punto de carga),
+     de modo que el robot encadene de forma autónoma las capacidades anteriores.
+
+  4. OE4. Percepción y detección de incidencias en el entorno. Integrar un módulo
+     de visión por computador basado en YOLO que detecte personas durante la patrulla,
+     grabe un clip del evento y lo registre como incidencia.
+
+  5. OE5. Arquitectura orientada a eventos. Diseñar el sistema de comunicación basa-
+     do en un bus de mensajería que desacople el robot del backend y canalice la telemetría,
+     las incidencias y los comandos de control.
+
+  6. OE6. Backend y persistencia de datos. Desarrollar un servicio de backend que
+     consuma los eventos del robot, exponga una API REST y persista la información en
+     los almacenes adecuados, incluyendo el vídeo de las incidencias y las series temporales
+     de telemetría.
+
+
+
+                                                                                           9
+10                                                                                       Objetivos
+
+
+     7. OE7. Seguridad y autenticación. Implementar un mecanismo de autenticación tanto
+        para el robot, mediante un esquema de confianza en el primer uso (Trust On First Use
+        (TOFU)) y tokens JSON Web Token (JWT), como para los usuarios, con control de
+        acceso basado en roles.
+
+     8. OE8. Aplicación de usuario. Desarrollar una aplicación multiplataforma con Flutter
+        desde la que el usuario controle la patrulla del robot y consulte el historial de incidencias
+        y la telemetría.
+
+     9. OE9. Integración y validación funcional. Integrar todos los subsistemas en una
+        solución desplegable mediante contenedores y comprobar su funcionamiento conjunto.
+
+  El grado de consecución de cada uno de estos objetivos se valora en el Capítulo 7, a la luz
+de los resultados presentados en el Capítulo 6.
+4. Metodología
+
+  Este capítulo describe el enfoque metodológico seguido para alcanzar los objetivos plan-
+teados, las herramientas y entornos empleados, y los criterios de evaluación previstos para
+valorar el sistema. La descripción detallada del diseño y la implementación se reserva para el
+Capítulo 5.
+
+
+4.1. Metodología de desarrollo
+   El trabajo se ha abordado mediante un enfoque de desarrollo iterativo e incremental,
+organizado en sprints sucesivos cuya gestión se ha apoyado en un tablero Kanban. En este
+tablero, las tareas avanzan por columnas según su estado, lo que ha permitido mantener
+una visión clara del progreso y priorizar el trabajo pendiente en cada iteración. En lugar de
+construir la solución completa de una sola vez, se ha avanzado por incrementos funcionales,
+validando cada parte antes de integrarla con el resto.
+   El orden de construcción ha seguido la cadena de dependencias del sistema. En primer
+lugar se levantó la infraestructura de datos (las bases de datos, el bus de mensajería y los
+servicios de almacenamiento y visualización), por ser el soporte sobre el que se apoya todo
+lo demás. A continuación se desarrolló el backend, que centraliza la lógica de negocio y la
+API. Después se abordó la capa robótica (robot_ws), que produce los datos y consume los
+servicios del backend. Y, por último, se implementó la aplicación de usuario, que también
+consume la API del backend.
+   La integración entre el robot y el backend se realizó funcionalidad a funcionalidad, siguiendo
+siempre el mismo patrón: primero se implementaba en el backend el endpoint o la lógica
+necesaria para una capacidad concreta, y a continuación se desarrollaba la parte del robot
+que se conecta a ella. Este encadenamiento, repetido para cada funcionalidad (telemetría,
+incidencias, comandos de control y autenticación), garantizaba que cada extremo dispusiera
+ya de su contraparte y que cada incremento fuera verificable de principio a fin.
+   Finalmente, todo el código se ha organizado como un monorepo, es decir, un único re-
+positorio que agrupa todos los componentes del sistema, lo que facilita la coherencia entre
+las distintas partes y simplifica el despliegue conjunto. El repositorio se estructura en cua-
+tro bloques principales: la capa robótica (robot_ws), el backend (backend), la aplicación de
+usuario (flutter_frontend) y un conjunto de scripts de automatización del despliegue. La
+arquitectura concreta de cada bloque se detalla en el Capítulo 5.
+
+
+4.2. Herramientas, frameworks y entornos
+  El sistema se apoya en un conjunto de tecnologías de código abierto, seleccionadas por su
+madurez y por su integración con el ecosistema de ROS 2. La Tabla 4.1 resume las principales
+herramientas empleadas en cada capa del sistema.
+
+
+
+                                                                                              11
+12                                                                              Metodología
+
+
+
+Tabla 4.1: Principales tecnologías empleadas por capa del sistema. Fuente: elaboración propia.
+        Capa                      Tecnologías
+        Plataforma robótica       TurtleBot 4, ROS 2 Humble
+        Navegación y mapeado      Nav2, slam_toolbox, explore_lite
+        Percepción                YOLOv8n (Ultralytics), OpenCV
+        Mensajería                Apache Kafka (cliente confluent-kafka)
+        Backend                   FastAPI, SQLAlchemy, Uvicorn
+        Persistencia              PostgreSQL, InfluxDB, MinIO
+        Visualización             Grafana
+        Aplicación de usuario     Flutter
+        Infraestructura           Docker, Docker Compose
+
+
+
+  A continuación se detalla el papel de cada tecnología y la justificación de su elección,
+agrupadas por capa.
+
+
+
+4.2.1. Plataforma robótica y navegación
+
+  El robot empleado es el TurtleBot 4, una plataforma de robótica móvil de referencia com-
+puesta por una base Create 3, un computador de a bordo (Raspberry Pi 4), un sensor LiDAR
+y una cámara OAK-D. Se ha elegido por ser una plataforma estándar, asequible y con so-
+porte oficial para ROS 2, lo que evita desviar el esfuerzo del trabajo hacia la integración de
+hardware a bajo nivel. Sobre ella se ejecuta ROS 2 en su distribución Humble, una versión de
+soporte prolongado que es la recomendada para el TurtleBot 4 (Macenski et al., 2022).
+  La navegación se construye sobre tres paquetes consolidados del ecosistema. La pila Nav2 se
+ocupa de la planificación y el control del movimiento (Macenski et al., 2020); slam_toolbox
+construye el mapa del entorno mediante SLAM láser (Macenski & Jambrecic, 2021); y
+explore_lite dirige la exploración autónoma inicial que recorre el espacio desconocido has-
+ta completar el mapa. Reutilizar estas soluciones, en lugar de reimplementar la navegación,
+permite concentrar el trabajo en la orquestación y la integración del sistema.
+
+
+
+4.2.2. Percepción visual
+
+  La detección de personas se realiza con YOLO en su versión nano (YOLOv8n), a través
+de la biblioteca de Ultralytics (Jocher et al., 2023). Se ha optado por la variante nano por
+ser la más ligera de la familia, lo que permite ejecutar la inferencia en la Central Processing
+Unit (CPU) del propio robot a una velocidad suficiente para la patrulla, sin necesidad de una
+GPU dedicada. La biblioteca aporta, además, modelos preentrenados y una interfaz sencilla
+que reduce el coste de integración. El tratamiento de las imágenes, esto es, la captura de los
+fotogramas de la cámara y la codificación del clip de vídeo de cada incidencia, se apoya en
+OpenCV, biblioteca estándar de facto en visión por computador.
+4.2. Herramientas, frameworks y entornos                                                      13
+
+
+4.2.3. Mensajería orientada a eventos
+   El bus de eventos que comunica el robot con el servidor es Apache Kafka (Kreps et al.,
+2011). Se ha preferido a una solución de mensajería más ligera porque conserva los mensajes en
+un registro durable, lo que desacopla por completo al productor del consumidor y permite que
+el backend procese la telemetría y las incidencias a su propio ritmo, e incluso reprocese eventos
+pasados. La comunicación se organiza en tres topics (robot_telemetry, robot_incidents
+y robot_commands). Tanto el robot como el backend acceden a Kafka mediante confluent-
+kafka, un cliente de alto rendimiento basado en la biblioteca librdkafka, escrita en C.
+
+4.2.4. Backend y servicios web
+   El backend se ha desarrollado con FastAPI, un framework web asíncrono para Python. Su
+elección responde a tres motivos: el alto rendimiento que aporta su modelo de servidor asín-
+crono (ASGI ), la validación automática de los datos de entrada y salida mediante Pydantic,
+y la generación automática de la documentación de la API según el estándar OpenAPI. La
+aplicación se sirve con Uvicorn, un servidor ASGI, y la configuración (credenciales y direc-
+ciones de los servicios) se gestiona con pydantic-settings a partir de variables de entorno,
+lo que facilita el despliegue en distintos equipos.
+   El acceso a la base de datos relacional se realiza mediante el Object-Relational Mapping
+(ORM) SQLAlchemy, que abstrae las consultas Structured Query Language (SQL) y mapea
+las tablas a clases de Python, mientras que Alembic versiona y aplica los cambios del esquema.
+El almacenamiento de los vídeos se gestiona con boto3, el Software Development Kit (SDK)
+de Simple Storage Service (S3), que permite operar sobre MinIO con la misma interfaz que
+el servicio de Amazon. Por último, la seguridad se apoya en pyjwt para los tokens JWT y en
+passlib con bcrypt para el cifrado de las contraseñas de los usuarios.
+
+4.2.5. Persistencia, almacenamiento y visualización
+   La distinta naturaleza de los datos del sistema ha llevado a emplear un almacén específico
+para cada tipo. Los datos estructurados y con relaciones (usuarios, robots e incidencias)
+residen en PostgreSQL, una base de datos relacional madura que garantiza la integridad
+mediante transacciones. La telemetría del robot (batería, posición y estado), de carácter
+temporal y alta frecuencia, se almacena en InfluxDB, una base de datos de series temporales
+(Time-Series Database (TSDB)) optimizada para este tipo de datos y para las consultas por
+intervalos de tiempo. El vídeo de las incidencias, al ser un objeto binario de gran tamaño, se
+guarda en MinIO, un almacén de objetos compatible con la API de S3; esta separación evita
+sobrecargar la base de datos relacional con ficheros pesados. Finalmente, Grafana proporciona
+la visualización de la telemetría mediante paneles que consultan InfluxDB, con un panel por
+robot que la aplicación de usuario incrusta directamente.
+
+4.2.6. Aplicación de usuario
+  La aplicación con la que interactúa el usuario se ha construido con Flutter, el framework
+de Google basado en el lenguaje Dart. Su principal ventaja es permitir desarrollar, a partir
+de una única base de código, una aplicación para móvil, web y escritorio, algo idóneo para
+un trabajo con tiempo limitado. Sobre Flutter se apoyan varios paquetes especializados:
+14                                                                             Metodología
+
+
+la gestión del estado se resuelve con flutter_riverpod; la navegación entre pantallas, con
+go_router; las llamadas a la API REST del backend, con el cliente HTTP dio; la persistencia
+local de la sesión, con shared_preferences; los componentes de la interfaz, con shadcn_ui;
+y la apertura del panel de Grafana en el navegador, con url_launcher.
+
+4.2.7. Infraestructura y despliegue
+   Toda la infraestructura de datos (PostgreSQL, Kafka, InfluxDB, MinIO y Grafana) se
+ejecuta en contenedores gestionados con Docker y orquestados mediante Docker Compose.
+Esta decisión persigue la reproducibilidad del entorno: un único fichero declarativo describe
+todos los servicios, sus versiones y su configuración, de modo que el sistema completo puede
+levantarse en cualquier equipo con un solo comando, sin instalaciones manuales y con un
+comportamiento idéntico. El aislamiento entre contenedores evita, además, los conflictos de
+dependencias entre los distintos servicios.
+
+4.2.8. Entorno de desarrollo y herramientas de apoyo
+   El grueso del sistema se ha desarrollado en Python, lenguaje común al backend y a los
+nodos del robot, lo que ha permitido compartir conocimientos y bibliotecas entre ambas
+partes. Es, además, el lenguaje de referencia para la programación de nodos en ROS 2 y para
+el ecosistema de visión por computador y aprendizaje automático empleado en la percepción.
+Para aislar las dependencias de cada componente se han utilizado entornos virtuales (virtual
+environments, venv), de modo que el backend y la capa robótica mantienen conjuntos de
+paquetes independientes y sin interferencias entre versiones; las dependencias de cada entorno
+se declaran de forma explícita (por ejemplo, en el fichero requirements.txt del backend),
+lo que refuerza la reproducibilidad ya mencionada.
+   Durante la elaboración del trabajo se ha empleado, asimismo, el asistente de inteligencia
+artificial Claude como herramienta de apoyo en tareas de revisión, búsqueda de información
+(research) y documentación. Su uso se ha limitado en todo momento a un papel auxiliar:
+las decisiones de diseño del sistema han sido tomadas y validadas por el autor, sin que la
+herramienta las sustituya.
+
+4.2.9. Bibliotecas y dependencias principales
+  A modo de síntesis, la Tabla 4.2 recoge las bibliotecas más relevantes empleadas en el
+desarrollo, indicando su función y el componente del sistema en el que se utilizan. La mayoría
+se han presentado ya en las subsecciones anteriores; la tabla las reúne como referencia.
+4.2. Herramientas, frameworks y entornos                                                15
+
+
+
+
+Tabla 4.2: Bibliotecas y dependencias principales, su función y el componente en el que se
+emplean. Fuente: elaboración propia.
+        Biblioteca             Función
+        Backend (Python)
+        FastAPI                Framework web asíncrono y exposición de la API REST
+        Uvicorn                Servidor ASGI que ejecuta la aplicación
+        SQLAlchemy             ORM de acceso a PostgreSQL
+        Alembic                Migraciones del esquema de la base de datos
+        influxdb-client        Escritura de la telemetría en InfluxDB
+        confluent-kafka        Consumo de los eventos del bus Kafka
+        boto3                  Acceso a MinIO (S3) para el vídeo de incidencias
+        Pydantic               Validación de datos y configuración por entorno
+        PyJWT                  Emisión y verificación de tokens JWT
+        passlib / bcrypt       Cifrado de las contraseñas de usuario
+        httpx                  Cliente HTTP asíncrono
+        Capa robótica (robot_ws, Python sobre ROS 2)
+        Ultralytics (YOLO)     Detección de personas durante la patrulla
+        OpenCV                 Captura de fotogramas y codificación del clip de vídeo
+        NumPy                  Cálculo numérico de soporte a la percepción
+        confluent-kafka        Publicación de telemetría e incidencias en Kafka
+        boto3                  Subida de los clips de vídeo a MinIO
+        httpx                  Solicitud del token al backend (TOFU y JWT)
+        Aplicación de usuario (Flutter, Dart)
+        Dio                     Cliente HTTP para consumir la API REST
+        Riverpod                Gestión del estado de la aplicación
+        go_router               Navegación entre pantallas
+        shared_preferences Persistencia local de la sesión
+        shadcn_ui               Componentes de la interfaz de usuario
+        url_launcher            Apertura del panel de Grafana en el navegador
+        intl                    Formato de fechas y localización
+16                                                                                Metodología
+
+
+4.3. Criterios y métricas de evaluación
+  Dado que el sistema integra subsistemas de naturaleza distinta, su evaluación contempla
+varias dimensiones complementarias:
+
+     • Navegación y patrulla. Capacidad del robot para construir el mapa, generar una
+       ruta de cobertura válida y recorrerla de forma cíclica sin colisiones, así como la tasa de
+       éxito en alcanzar las poses objetivo.
+
+     • Detección de incidencias. Acierto del detector en la identificación de personas, con-
+       siderando la confianza de las detecciones y la presencia de falsos positivos y falsos
+       negativos.
+
+     • Rendimiento del sistema de extremo a extremo. Latencia desde que se produce
+       un evento en el robot hasta que la incidencia queda registrada y es visible para el
+       usuario, así como la regularidad del envío de telemetría.
+
+     • Validación funcional de la integración. Comprobación de que los flujos completos
+       (arranque, mapeado, patrulla, detección, notificación y control desde la aplicación) se
+       ejecutan de principio a fin.
+
+   Conviene señalar que, en el estado actual del trabajo, la evaluación realizada es funda-
+mentalmente de carácter funcional. La obtención de métricas cuantitativas sistemáticas,
+especialmente sobre hardware real, queda pendiente y se discute en el Capítulo 6 y entre las
+líneas de trabajo futuro del Capítulo 7.
+5. Desarrollo
+  En este capítulo se detalla la implementación del sistema, organizada en torno a los flujos
+de datos que lo recorren de extremo a extremo. Se parte de una visión global por capas
+(sección 5.1) y, a continuación, se desciende al detalle de la infraestructura de despliegue
+(sección 5.2), del backend (sección 5.3), de la capa robótica (sección 5.4) y de la aplicación
+de usuario (sección 5.5). La descripción se ancla en el código fuente del proyecto, del que se
+incluyen extractos representativos.
+
+
+5.1. Vista general y flujos de datos
+   El sistema se estructura en seis capas, desde la aplicación de usuario hasta la plataforma
+física del robot. La figura 5.1 las presenta apiladas, junto con los componentes que las integran
+y el sentido general del flujo de información.
+
+                              Aplicación de usuario (Flutter)
+                      Acceso, Inicio, Robots, Incidencias, Perfil, Administración
+
+
+                                    API REST (FastAPI)
+                  Endpoints de robot, usuario y administración; autenticación JWT
+
+
+                                     Servicios del backend
+            Consumidores de eventos, productor de comandos, lógica de negocio, seguridad
+
+
+                                Bus de eventos y almacenes
+                           Kafka, PostgreSQL, InfluxDB, MinIO, Grafana
+
+
+                                   Capa robótica (ROS 2)
+                     patrol_nav, detect_incident, serve_telemetry, secret_helper
+
+
+                                        Plataforma física
+                   TurtleBot 4, Nav2, slam_toolbox, explore_lite, cámara OAK-D
+
+
+
+Figura 5.1: Vista general del sistema organizada en capas, desde la aplicación de usuario
+hasta la plataforma física del robot. Fuente: elaboración propia.
+
+  Los apartados siguientes describen los tres flujos principales que atraviesan estas capas.
+
+
+
+                                                                                              17
+18                                                                                 Desarrollo
+
+
+5.1.1. Cliente → servidor → robot: control de la patrulla
+   Las órdenes del usuario (iniciar, detener y reinstalar la patrulla) viajan desde la aplicación
+hasta el robot a través del backend y del bus de eventos. La aplicación invoca el endpoint
+correspondiente (PUT /user/{id}/start-patrol, stop-patrol o reinstall). El backend
+valida que el robot pertenece al usuario autenticado y que su estado operativo permite la
+transición; a continuación publica un comando en el topic robot_commands de Kafka. En el
+robot, el nodo orquestador patrol_nav sondea dicho topic cada 0,5 s (poll_command_topic),
+descarta los mensajes cuyo robot_id no coincide con el suyo y, según el comando, ejecuta
+handle_start_patrol, handle_stop_patrol o handle_reinstall, provocando la transi-
+ción de su máquina de estados.
+   Conviene precisar cómo se gobierna el estado en la base de datos. La orden de inicio
+no escribe el estado operativo en la base de datos: deja esa responsabilidad al heartbeat
+del robot, de modo que la primera vuelta no se salte la fase de mapeo. En cambio, las
+órdenes de detención y reinstalación sí fijan de forma optimista los valores stopped e idle,
+respectivamente. En todos los casos, el heartbeat periódico del robot (sección 5.1.2) actúa
+como fuente de verdad que reconcilia el estado almacenado con el estado real.
+
+5.1.2. Robot → servidor → cliente: telemetría, incidencias y estado
+  En sentido ascendente coexisten tres caminos.
+
+Telemetría. El nodo serve_telemetry publica el estado del robot una vez por segundo en
+el topic robot_telemetry, incorporando el JWT del robot en la cabecera Authorization del
+mensaje. En el backend, un consumidor en hilo independiente verifica el token, comprueba
+que el robot_id del mensaje coincide con el del token y escribe un punto de la medida
+robot_telemetry en InfluxDB. Grafana consume esa serie temporal y la aplicación la muestra
+empotrada en modo kiosk, obteniendo la Uniform Resource Locator (URL) filtrada por robot
+mediante GET /user/{id}/dashboard-url.
+
+Incidencias. El nodo detect_incident detecta personas mediante visión por computador,
+graba un vídeo del suceso, lo sube a MinIO y publica en el topic robot_incidents (de nuevo
+con el JWT en cabecera) los datos del objeto almacenado. El consumidor de incidencias del
+backend valida el token, crea un registro Incidente en PostgreSQL y lo deja disponible para
+la aplicación, que lista las incidencias (GET /user/incidents) y reproduce el vídeo a través
+de una URL prefirmada (GET /user/incidents/{id}/show-video).
+
+Estado operativo. El orquestador patrol_nav envía un heartbeat cada 10 s mediante PUT
+/robot/heartbeat, traduciendo su estado interno de la Finite State Machine (FSM) a uno
+de los valores admitidos. El backend valida el valor recibido y actualiza la conexión y el estado
+operativo del robot en PostgreSQL, datos que la aplicación refleja en la pantalla de inicio.
+
+5.1.3. Autenticación y arranque: TOFU y JWT
+  Antes de poder emitir telemetría o incidencias, el robot debe autenticarse. El nodo secret_helper
+implementa el patrón TOFU (trust on first use): en el primer arranque solicita un secreto
+5.2. Arquitectura e infraestructura                                                       19
+
+
+al backend mediante POST /robot/{id}/first-boot y lo persiste en disco; en arranques
+posteriores reutiliza ese secreto y se autentica con POST /robot/{id}/auth para obtener un
+JWT, que renueva cada hora. El resto de nodos obtiene ese token a través del servicio ROS
+2 2 get_robot_token, sin gestionar credenciales por su cuenta.
+  La tabla 5.1 resume los flujos descritos.
+
+
+     Tabla 5.1: Resumen de los flujos de datos del sistema. Fuente: elaboración propia.
+         Flujo            Origen          Mecanismo / camino         Almacén
+         Control          App             REST → Kafka               PostgreSQL
+                                          robot_commands → FSM
+         Telemetría       Robot           Kafka robot_telemetry      InfluxDB
+                                          → consumidor →
+                                          InfluxDB → Grafana
+         Incidencias      Robot           MinIO + Kafka              MinIO /
+                                          robot_incidents →          PostgreSQL
+                                          consumidor
+         Estado           Robot           PUT /robot/heartbeat       PostgreSQL
+         Autenticación    Robot           TOFU first-boot / auth     PostgreSQL
+
+
+
+
+5.2. Arquitectura e infraestructura
+   La infraestructura se despliega mediante contenedores. El fichero backend/docker-compose.yml
+define ocho servicios: la base de datos relacional (postgres), el bus de eventos (zookeeper y
+kafka) con su trabajo de inicialización (init-kafka), la base de series temporales (influxdb),
+el almacén de objetos (minio) con su inicializador (init-minio) y la visualización (grafana).
+Por su parte, robot_ws/docker-compose.yml define un único servicio de desarrollo ROS 2 2
+(ros2_dev), conectado a la red externa backend_default y configurado con acceso a WSLg
+y GPU para ejecutar herramientas gráficas.
+   Es importante señalar que ni el backend (FastAPI ) ni los nodos del robot se ejecutan
+dentro de los contenedores de infraestructura: corren como procesos externos y se conectan a
+los servicios anteriores a través de los puertos publicados en el anfitrión. La tabla 5.2 recoge
+esos puertos.
+
+
+ Tabla 5.2: Servicios de infraestructura y puertos publicados. Fuente: elaboración propia.
+       Servicio          Imagen               Puerto            Función
+       postgres          postgres:17          5432              Datos relacionales
+       zookeeper         cp-zookeeper:7.5.0   2181 (int.)       Coordinación Kafka
+       kafka             cp-kafka:7.5.0       9094 / 29092      Bus de eventos
+       influxdb          influxdb:2.7         8086              Series temporales
+       minio             minio (2024)         9000 / 9001       Objetos / consola
+       grafana           grafana:latest       3000              Visualización
+       backend           FastAPI (proceso)    8000              API REST
+       nodos robot       ROS 2 2 (procesos)   —                 Cliente del bus
+20                                                                               Desarrollo
+
+
+  La topología de red de Kafka merece una nota. El broker expone dos listeners: PLAINTEXT://kafka:29092,
+usado por los clientes que viven dentro de la red de contenedores, y PLAINTEXT_HOST://localhost:9094,
+usado por el backend y los nodos del robot cuando corren en el anfitrión. El extracto 5.1
+muestra esa configuración. Los trabajos de inicialización crean, respectivamente, los tres to-
+pics (robot_incidents, robot_telemetry, robot_commands) y el bucket tfg-incidentes
+de MinIO. Por coherencia, los nodos del robot disponen de dos ficheros de entorno: .env
+para ejecución en el anfitrión y .env.container con las direcciones internas (kafka:29092,
+minio:9000, host.docker.internal:8000).
+
+                     Listeners del broker Kafka (docker-compose.yml)
+
+     1 kafka:
+     2   image: confluentinc/cp-kafka:7.5.0
+     3   environment:
+     4     KAFKA_ADVERTISED_LISTENERS:
+            ↪  PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9094
+     5     KAFKA_LISTENER_SECURITY_PROTOCOL_MAP:
+            ↪  PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+     6     KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+     7   ports:
+     8     - "9094:9094"
+
+
+
+5.3. Backend
+   El backend, construido con FastAPI, expone la API REST, gestiona la persistencia y
+aloja los consumidores de eventos. Se organiza en módulos: models.py (modelo de datos),
+server.py (endpoints y consumidores), security.py (criptografía y tokens) y dependencies.py
+(inyección de identidad).
+
+5.3.1. Modelo de datos
+   El modelo, definido con el ORM SQLAlchemy en models.py, consta de tres entidades.
+Usuario tiene clave primaria entera, email único, un rol (user o admin) y la contraseña
+almacenada como password_hash. Robot usa una clave primaria de tipo cadena (apta para
+números de serie o códigos QR), un secret_hash inicialmente nulo —se genera en el primer
+arranque TOFU—, y los campos estado_conexion (online/offline) y estado_operativo.
+Incidente emplea como clave primaria un identificador UUID generado aleatoriamente, junto
+con bucket_name, video_filename y el indicador revisado.
+   El borrado se propaga en cascada (al eliminar un usuario se eliminan sus robots e inciden-
+cias), y la tabla de incidencias define dos índices para acelerar las consultas: uno compuesto
+por robot y fecha, y otro parcial sobre las incidencias no revisadas.
+
+5.3.2. API REST
+  La tabla 5.3 recoge el inventario completo de endpoints, agrupados según la dependencia
+de autenticación que exigen, y no según la etiqueta de documentación, que en algunos casos
+5.3. Backend                                                                            21
+
+
+resulta engañosa.
+
+
+Tabla 5.3: Endpoints de la API REST agrupados por ámbito de autenticación. Fuente: ela-
+boración propia. Se omiten los endpoints base GET / y GET /health.
+               Método   Ruta                                 Autenticación
+               Ámbito robot
+               PUT      /robot/heartbeat                     JWT robot
+               POST     /robot/{id}/first-boot               — (TOFU)
+               POST     /robot/{id}/auth                     secret_key
+               Ámbito usuario
+               POST     /user/register                       —
+               POST     /user/login                          —
+               GET      /user/profile                        JWT usuario
+               POST     /user/new-robot                      JWT usuario
+               GET      /user/robots                         JWT usuario
+               DELETE /user/{id}/delete                      JWT usuario
+               GET      /user/{id}/dashboard-url             JWT usuario
+               PUT      /user/{id}/start-patrol              JWT usuario
+               PUT      /user/{id}/stop-patrol               JWT usuario
+               PUT      /user/{id}/reinstall                 JWT usuario
+               PUT      /user/{id}/alias                     JWT usuario
+               GET      /user/incidents                      JWT usuario
+               GET      /user/{id}/incidents                 JWT usuario
+               GET      /user/incidents/{id}/show-video      JWT usuario
+               PUT      /user/update-password                JWT usuario
+               PUT      /user/update-info                    JWT usuario
+               Ámbito administración
+               GET      /admin/robots                        JWT admin
+               GET      /admin/robots/{id}/incidents         JWT admin
+               GET      /admin/users                         JWT admin
+               DELETE /admin/users/{id}/delete               JWT admin
+               DELETE /admin/robots/{id}/delete              JWT admin
+               PUT      /admin/users/{id}/grant              JWT admin
+               PUT      /admin/users/{id}/revoke             JWT admin
+
+
+  Como ejemplo del flujo de control, PUT /user/{id}/start-patrol valida la propiedad
+del robot y su estado, y publica el comando en Kafka sin marcar el estado en la base de
+datos; el endpoint de reproducción GET /user/incidents/{id}/show-video devuelve una
+URL prefirmada de MinIO con validez de una hora.
+
+5.3.3. Consumidores y productor de eventos
+  En server.py, la función create_server_consumers instancia dos consumidores de Kaf-
+ka —incident-consumer, que arranca desde el offset más antiguo, y telemetry-consumer,
+que arranca desde el más reciente— y un productor para los comandos. Al iniciarse el servi-
+dor, startup_event lanza los bucles detect_incident y serve_telemetry en hilos daemon
+independientes, de modo que el procesamiento de eventos no bloquea el atendido de peticio-
+22                                                                                  Desarrollo
+
+
+nes HyperText Transfer Protocol (HTTP). Al apagarse, shutdown_event vacía el productor
+para no perder mensajes pendientes.
+
+
+5.3.4. Seguridad
+  La seguridad se apoya en varios mecanismos. Las contraseñas se almacenan con bcrypt a tra-
+vés de passlib. La identidad se transporta en JWT firmados con HS256 e incluyen una fecha de
+expiración. La distinción entre usuarios y robots se resuelve observando si el sujeto del token es
+numérico: los identificadores de usuario lo son y los de robot no (dependencies.py). El control
+de acceso por roles (Role-Based Access Control (RBAC)) se aplica en get_current_admin,
+que exige rol de administrador.
+  Para los mensajes que llegan por Kafka, el backend valida el JWT incluido en la cabecera del
+mensaje y comprueba que el robot_id del cuerpo coincide con el sujeto del token, evitando la
+suplantación de un robot por otro. El acceso a los vídeos se realiza mediante URL prefirmadas
+de MinIO generadas con boto3 y caducidad de una hora. Finalmente, la política de Cross-
+Origin Resource Sharing (CORS) está abierta durante el desarrollo y queda pendiente de
+restringir en producción. El extracto 5.2 muestra la generación y verificación de tokens.
+
+                         Generación y verificación de JWT (security.py)
+
+      1   def generate_jwt_token(subject: str) -> str:
+      2       tiempo_expiracion = datetime.now(timezone.utc) + timedelta(
+      3           minutes=settings.access_token_expire_minutes)
+      4       payload = {"sub": str(subject), "exp": tiempo_expiracion}
+      5       return jwt.encode(payload, settings.secret_key,
+      6                         algorithm=settings.algorithm)
+      7
+      8   def verificar_token(token: str) -> str:
+      9       payload = jwt.decode(token, settings.secret_key,
+     10                            algorithms=[settings.algorithm])
+     11       subject = payload.get("sub")
+     12       if not subject:
+     13           raise HTTPException(status_code=401, detail="Token sin ID (subject)")
+     14       return subject
+
+
+
+
+5.4. Capa robótica
+   La capa robótica es un espacio de trabajo de ROS 2 2 Humble que combina paquetes propios
+y de terceros. Los paquetes propios son patrol_nav (orquestación), detect_incident (detec-
+ción), serve_telemetry (telemetría), secret_helper (gestión de secretos) y secret_helper_interfaces
+(que define el servicio GetToken). Los de terceros son explore_lite (Macenski et al., 2020)
+para la exploración, slam_toolbox (Macenski & Jambrecic, 2021) para el mapeo, Nav2 (Ma-
+censki et al., 2020) para la navegación, y Ultralytics YOLO (Jocher et al., 2023; Redmon
+et al., 2016) para la visión por computador. La mensajería con el backend usa Kafka (Kreps
+et al., 2011). La tabla 5.4 resume los nodos propios.
+5.4. Capa robótica                                                                       23
+
+
+         Tabla 5.4: Nodos ROS 2 propios del sistema. Fuente: elaboración propia.
+        Nodo                Responsabilidad                   Interfaces
+        patrol_nav          Orquestación de la patrulla       robot_commands, /odom,
+                            (FSM)                             Nav2
+        detect_incident     Detección de personas y           /oakd/rgb/…,
+                            grabación                         robot_incidents
+        serve_telemetry     Recolección y envío de            sensores,
+                            telemetría                        robot_telemetry
+        secret_helper       TOFU y refresco del JWT           servicio
+                                                              get_robot_token
+
+
+
+5.4.1. Orquestador: patrol_nav
+   El nodo patrol_nav implementa una máquina de estados finitos (tabla 5.5) que arranca
+en IDLE a la espera del primer comando de inicio. Antes de operar, espera a que Nav2 esté
+activo invocando waitUntilNav2Active con localizador bt_navigator: en modo SLAM no
+existe amcl, por lo que el verdadero requisito para enviar objetivos es que bt_navigator
+esté disponible. El nodo mantiene tres temporizadores: el sondeo de comandos cada 0,5 s, el
+heartbeat cada 10 s (traduciendo el estado interno con el diccionario FSM_TO_OPERATIVO) y el
+refresco del token cada 10 s.
+
+ Tabla 5.5: Estados de la máquina de estados de patrol_nav. Fuente: elaboración propia.
+           Estado FSM        Heartbeat      Significado
+           IDLE              idle           Registrado, sin mapa o recién arrancado
+           EXPLORING         exploring      Exploración autónoma del entorno
+           SAVING_MAP        saving_map     Guardado del mapa generado
+           PLANNING          planning       Cálculo de la ruta de patrulla
+           PATROLLING        patrolling     Recorrido cíclico de los waypoints
+           PATROL_STOPPED    stopped        Patrulla detenida, robot en el dock
+
+
+   El ciclo completo abarca varias fases. En exploración, el nodo lanza explore_lite como
+subproceso junto con slam_toolbox, y da por terminada la fase cuando se supera un tiempo
+mínimo (explore_min_secs, 900 s) y, además, el robot lleva inactivo un intervalo (explore_idle_secs,
+180 s), medido sobre la odometría /odom. En guardado, solicita el mapa al servicio /map_saver/save_map
+de forma asíncrona. En planificación, genera los waypoints a partir de la imagen del mapa
+(extracto 5.4): mediante visión por computador con OpenCV umbraliza el espacio libre, lo
+erosiona para alejarse de las paredes y traza un barrido en zig-zag, encadenando el punto de
+dock al inicio y al final. En patrulla, recorre cíclicamente la ruta con goThroughPoses. La
+parada cancela la navegación en curso y regresa al dock; dado que Nav2 procesa las cance-
+laciones de forma asíncrona, el nodo espera a que la tarea activa concluya antes de emitir el
+nuevo objetivo. Por último, la reinstalación borra los ficheros del mapa (.pgm y .yaml) y
+devuelve la FSM a IDLE.
+   El extracto 5.3 muestra el despacho de la máquina de estados y el manejo del comando de
+inicio, que reutiliza el mapa si ya existe.
+24                                                                           Desarrollo
+
+
+                         Máquina de estados y arranque (patrol_nav.py)
+
+      1   def state_machine(self):
+      2       if self.state == 'IDLE':
+      3           return # Espera al primer start_patrol del usuario.
+      4       elif self.state == 'EXPLORING':   self.run_exploration()
+      5       elif self.state == 'SAVING_MAP': self.save_map()
+      6       elif self.state == 'PLANNING':    self.generate_waypoints_from_map()
+      7       elif self.state == 'PATROLLING': self.run_patrol_cycle()
+      8       elif self.state == 'PATROL_STOPPED': self.run_patrol_stopped()
+      9
+     10   def handle_start_patrol(self):
+     11       if self.state == 'IDLE':
+     12           if self._map_exists():
+     13               self.state = 'PLANNING'    # Reutiliza el mapa guardado.
+     14           else:
+     15               self.state = 'EXPLORING'   # Ciclo completo desde cero.
+     16       elif self.state == 'PATROL_STOPPED':
+     17           self.active_task = None
+     18           self.state = 'PATROLLING'      # Reanuda la patrulla.
+
+
+                       Generación de waypoints en zig-zag (patrol_nav.py)
+
+      1   grid_spacing_pixels = max(1, int(self.grid_spacing_m / resolution))
+      2   waypoints = []
+      3   for y in range(0, safe_binary.shape[0], grid_spacing_pixels):
+      4       x_range = range(0, safe_binary.shape[1], grid_spacing_pixels)
+      5       if (y // grid_spacing_pixels) % 2 != 0:
+      6           x_range = reversed(x_range)        # Barrido alterno (zig-zag).
+      7       for x in x_range:
+      8           if safe_binary[y, x] == 255:       # Solo celdas libres seguras.
+      9               real_x = origin_x + (x * resolution)
+     10               real_y = origin_y + ((img.shape[0] - y) * resolution)
+     11               waypoints.append(self.create_pose(real_x, real_y, 0.0))
+
+
+
+5.4.2. Detección: detect_incident
+
+  El nodo detect_incident se suscribe a la imagen de la cámara (/oakd/rgb/preview/image_raw)
+y aplica el modelo YOLOv8n sobre cada fotograma, considerando incidencia la presencia de
+una persona con confianza superior al umbral configurable. Para poder grabar el suceso
+completo, mantiene un búfer circular de los últimos cien fotogramas; tras un disparo, sigue
+acumulando cincuenta fotogramas posteriores antes de cerrar el clip. A continuación entra en
+un periodo de enfriamiento de 30 s para evitar detecciones repetidas. El volcado del vídeo y
+su subida se realizan en un hilo de entrada/salida separado, que codifica el clip en mp4 con
+OpenCV, lo sube a MinIO y publica el aviso en Kafka con el JWT en cabecera. El extracto 5.5
+resume esta lógica.
+5.5. Aplicación de usuario                                                                   25
+
+
+            Lógica de detección con búfer y enfriamiento (detect_incident.py)
+
+   1 def image_callback(self, msg):
+   2     cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+   3     if self.cooldown:
+   4         return
+   5     self.incident_buffer.append(cv_image)
+   6     if self.post_trigger_counter > 0:
+   7         self.post_trigger_counter -= 1
+   8         if self.post_trigger_counter == 0:       # Cierra el clip.
+   9             self.cooldown = True
+  10             self.timer = self.create_timer(self.cooldown_time,
+                  ↪  self.reset_cooldown)
+  11             threading.Thread(target=self.process_incident_io,
+  12                              args=(list(self.incident_buffer),
+                                   ↪  int(time.time())),
+  13                              daemon=True).start()
+  14     elif self.detect_incident(cv_image):         # Disparo: persona
+          ↪  detectada.
+  15         self.post_trigger_counter = 50
+
+
+5.4.3. Telemetría: serve_telemetry
+   El nodo serve_telemetry se suscribe a las fuentes de estado del robot —batería (/battery_state),
+odometría (/odom), atraque (/dock_status), secuestro (/kidnap_status), deslizamiento (/slip_status)
+y ruedas (/wheel_status)— y mantiene un diccionario de estado que sus respectivos callbacks
+actualizan. Un temporizador publica ese estado consolidado en Kafka una vez por segundo,
+incorporando el JWT del robot en la cabecera del mensaje.
+
+5.4.4. Gestión de secretos: secret_helper
+   El nodo secret_helper centraliza la autenticación. Aplica el patrón TOFU: si no existe
+un secreto local, lo solicita al backend y lo persiste en la ruta indicada por SECRET_PATH,
+montada como volumen para sobrevivir a las recreaciones del contenedor. Un hilo en segundo
+plano renueva el JWT cada hora. El nodo publica el servicio ROS 2 2 get_robot_token, que
+el resto de nodos consume de forma no bloqueante (mediante call_async y un callback de
+finalización) para no detener el ejecutor de hilo único.
+
+
+5.5. Aplicación de usuario
+   La aplicación está desarrollada en Flutter, lo que permite desplegarla en múltiples platafor-
+mas desde un único código. La navegación se gestiona con go_router, que define las rutas y
+aplica una redirección según el estado de autenticación, así como una protección de la ruta de
+administración en función del rol. El estado se gestiona con Riverpod y la comunicación con
+la API REST se realiza con el cliente dio, tomando la dirección base de AppConfig.baseUrl.
+A continuación se describe brevemente cada pantalla; las capturas correspondientes se incor-
+porarán en la versión final.
+26                                                                               Desarrollo
+
+
+Acceso.    Pantalla de inicio de sesión y registro de usuarios.
+
+Inicio. Pantalla principal «WARDEN»: lista los robots del usuario con su estado y permite
+iniciar o detener la patrulla, además de ofrecer ayuda contextual.
+
+Robots.    Gestión del parque de robots: alta, cambio de alias, reinstalación y borrado.
+
+Incidencias y detalle. Listado de incidencias y pantalla de detalle con la reproducción del
+clip de vídeo asociado.
+
+Perfil.   Consulta y edición de los datos del usuario, incluido el cambio de contraseña.
+
+Administración. Disponible solo para administradores: gestión de usuarios y robots del
+sistema, con concesión y revocación de privilegios.
+6. Resultados
+   Este capítulo presenta los resultados del trabajo. Conviene advertir desde el inicio que la
+validación realizada hasta el momento es de carácter preliminar y funcional: se centra en
+comprobar que los flujos del sistema operan de extremo a extremo, mientras que la campaña
+de medición cuantitativa sobre hardware real queda pendiente. Por ello, este capítulo describe
+el diseño de la evaluación y el estado actual de la validación, y reserva espacios señalados
+para los datos que se incorporarán al completarla.
+
+
+6.1. Entorno y escenario de pruebas
+  La evaluación del sistema está prevista sobre el robot TurtleBot 4 en una estancia cerrada
+de tamaño moderado. El escenario de prueba contempla el ciclo completo de operación:
+arranque del robot, exploración y mapeado del entorno, generación de la ruta de cobertura,
+patrulla cíclica, detección de la presencia de una persona y notificación de la incidencia, así
+como el control de la patrulla desde la aplicación de usuario.
+
+
+6.2. Validación funcional
+   En el estado actual del trabajo, la validación se ha orientado a verificar la correcta inte-
+gración de los subsistemas y la coherencia de los flujos de datos entre el robot, el bus de
+eventos, el backend y la aplicación de usuario. Esta validación funcional comprende, entre
+otros aspectos, las transiciones de la máquina de estados del orquestador, la generación de
+la ruta a partir del mapa, el disparo de una incidencia ante una detección y su registro en el
+sistema.
+
+
+6.3. Métricas previstas y estado de la medición
+  Para completar la evaluación se prevé recoger las métricas definidas en la Sección 4.3: la
+tasa de éxito de la navegación y la patrulla, el acierto del detector de personas (en términos
+de confianza y de falsos positivos y negativos) y la latencia de extremo a extremo desde la
+detección hasta el registro de la incidencia. La Tabla 6.1 recoge la plantilla prevista para estos
+resultados.
+
+
+6.4. Discusión
+  Aunque los resultados cuantitativos están pendientes, la validación funcional realizada per-
+mite afirmar que la arquitectura propuesta es coherente y que sus componentes se integran
+según el diseño previsto. El desacoplamiento mediante el bus de eventos ha facilitado el de-
+sarrollo y la prueba de cada subsistema por separado, lo que respalda la decisión de diseño
+
+
+
+                                                                                               27
+28                                                                                Resultados
+
+
+
+     Tabla 6.1: Plantilla de métricas de evaluación previstas. Fuente: elaboración propia.
+               Métrica                          Unidad                   Valor
+               Tasa de éxito de la patrulla     % de poses alcanzadas    n/d
+               Confianza media de detección     [0, 1]                   n/d
+               Falsos positivos                 detecciones/hora         n/d
+               Latencia detección–registro      ms                       n/d
+
+
+adoptada. Las principales incógnitas que la evaluación cuantitativa deberá despejar son el
+comportamiento de la navegación en presencia de obstáculos dinámicos, la fiabilidad del de-
+tector en condiciones reales de iluminación y la latencia del flujo completo de notificación.
+Estas cuestiones se retoman, junto con las limitaciones del trabajo, en el Capítulo 7.
+7. Conclusiones
+
+  Este capítulo recapitula el trabajo realizado, valora el grado de consecución de los objetivos
+planteados, expone las aportaciones y limitaciones, y traza las líneas de trabajo futuro. Por
+último, se incluye una breve valoración personal.
+
+
+7.1. Grado de consecución de los objetivos
+   El desarrollo de este Trabajo Fin de Grado ha permitido construir un sistema robótico de
+patrulla autónoma funcional e integrado. Retomando los objetivos específicos formulados en
+el Capítulo 3, puede afirmarse que se ha implementado la cartografía autónoma del entorno
+mediante exploración y SLAM (OE1), la generación y ejecución de una ruta de cobertura
+con Nav2 (OE2) y la detección de incidencias en el borde con YOLO (OE3). Asimismo, se ha
+diseñado la arquitectura orientada a eventos que desacopla el robot del backend (OE4), se ha
+desarrollado el servicio de backend con persistencia de datos relacionales, de vídeo y de series
+temporales (OE5), se ha implementado el esquema de seguridad basado en TOFU, JWT y
+roles (OE6) y se ha construido la aplicación de usuario con Flutter (OE7). La integración de
+todos los subsistemas en una solución desplegable mediante contenedores se ha completado
+en su vertiente funcional, si bien la validación cuantitativa queda pendiente (OE8).
+
+
+7.2. Aportaciones
+   La principal aportación del trabajo es la integración de extremo a extremo de un
+sistema de vigilancia robótica con tecnologías abiertas, que cubre desde la cartografía y la
+patrulla autónoma hasta la notificación de incidencias y su consulta desde una aplicación mó-
+vil. Frente a soluciones centradas en un único subproblema, este trabajo articula navegación,
+percepción, mensajería, servicios web y aplicación de usuario en un único sistema coherente.
+La adopción de una arquitectura orientada a eventos, que desacopla la capa robótica del
+plano de control, constituye una decisión de diseño que ha demostrado su valor al facilitar el
+desarrollo y la prueba independiente de cada componente.
+
+
+7.3. Limitaciones
+   El trabajo presenta varias limitaciones que conviene reconocer. La más relevante es que
+la validación realizada es preliminar y funcional, sin una campaña de medición cuantitativa
+sobre hardware real que respalde el rendimiento del sistema. Además, la estrategia de pla-
+nificación de la ruta de cobertura es deliberadamente sencilla y puede resultar subóptima
+en estancias de geometría compleja. La detección se limita actualmente a la presencia de
+personas, y no incorpora seguimiento de objetos ni distinción entre individuos. Por último,
+
+
+
+                                                                                             29
+30                                                                                Conclusiones
+
+
+algunas capacidades avanzadas inicialmente contempladas no forman parte de la implemen-
+tación actual.
+
+
+7.4. Trabajo futuro
+  A partir de las limitaciones anteriores se identifican las siguientes líneas de trabajo futuro:
+
+     • Evaluación cuantitativa. Ejecutar una campaña de pruebas sistemática sobre el robot
+       real que permita obtener las métricas previstas en el Capítulo 6.
+
+     • Seguimiento multiobjeto. Incorporar un algoritmo de seguimiento que asigne iden-
+       tificadores persistentes a las personas detectadas y reduzca las alertas redundantes.
+
+     • Transmisión de vídeo en directo. Añadir la difusión del vídeo en tiempo real para
+       permitir la supervisión remota durante la patrulla.
+
+     • Notificaciones en tiempo real. Avisar al usuario de forma inmediata ante una inci-
+       dencia mediante notificaciones push o canales de comunicación en tiempo real.
+
+     • Planificación de cobertura avanzada. Sustituir la rejilla en zig-zag por estrategias
+       de cobertura más eficientes y adaptadas a la geometría del entorno.
+
+     • Operación multirobot. Extender el sistema para coordinar varios robots patrullando
+       un mismo espacio.
+
+
+7.5. Valoración personal
+   La realización de este trabajo me ha permitido integrar en un único proyecto conocimientos
+de áreas muy diversas (robótica, visión por computador, sistemas distribuidos y desarrollo
+de aplicaciones) y enfrentarme a los retos que surgen al hacer que componentes heterogéneos
+colaboren de forma coherente. Más allá del resultado técnico, considero que la principal
+lección ha sido la importancia de un buen diseño arquitectónico: las decisiones tomadas al
+principio, en especial el desacoplamiento mediante eventos, condicionaron favorablemente
+todo el desarrollo posterior.
+Bibliografía
+Chiang, S.-Y., & Huang, S.-E. (2026). Design of a Patrol and Security Robot with Semantic
+       Mapping and Obstacle Avoidance System Using RGB-D Camera and LiDAR. Com-
+       puters, Materials & Continua, 87 (1). https://doi.org/10.32604/cmc.2025.074528
+Di Paola, D., Milella, A., Cicirelli, G., & Distante, A. (2010). An Autonomous Mobile Robotic
+       System for Surveillance of Indoor Environments. International Journal of Advanced
+       Robotic Systems, 7 (1). https://doi.org/10.5772/7254
+Durrant-Whyte, H., & Bailey, T. (2006). Simultaneous localization and mapping: part I.
+       IEEE Robotics & Automation Magazine, 13(2), 99-110. https://doi.org/10.1109/
+       MRA.2006.1638022
+Galceran, E., & Carreras, M. (2013). A survey on coverage path planning for robotics. Robotics
+       and Autonomous Systems, 61(12), 1258-1276. https://doi.org/10.1016/j.robot.2013.
+       09.004
+Islam, M., Ahmed, T., Nuruddin, A. T. B., Islam, M., & Siddique, S. (2020). Autonomous In-
+       truder Detection Using a ROS-Based Multi-Robot System Equipped with 2D-LiDAR
+       Sensors.
+Jocher, G., Chaurasia, A., & Qiu, J. (2023). Ultralytics YOLO (Ver. 8.0.0). https://github.
+       com/ultralytics/ultralytics
+Kreps, J., Narkhede, N., & Rao, J. (2011). Kafka: a Distributed Messaging System for Log
+       Processing. Proceedings of the NetDB Workshop, 1-7.
+Macenski, S., & Jambrecic, I. (2021). SLAM Toolbox: SLAM for the dynamic world. Journal
+       of Open Source Software, 6(61), 2783. https://doi.org/10.21105/joss.02783
+Macenski, S., Foote, T., Gerkey, B., Lalancette, C., & Woodall, W. (2022). Robot Opera-
+       ting System 2: Design, architecture, and uses in the wild. Science Robotics, 7 (66),
+       eabm6074. https://doi.org/10.1126/scirobotics.abm6074
+Macenski, S., Martín, F., White, R., & Ginés Clavero, J. (2020). The Marathon 2: A Naviga-
+       tion System. IEEE/RSJ International Conference on Intelligent Robots and Systems
+       (IROS), 2718-2725. https://doi.org/10.1109/IROS45743.2020.9341207
+Quigley, M., Conley, K., Gerkey, B., Faust, J., Foote, T., Leibs, J., Wheeler, R., & Ng, A. Y.
+       (2009). ROS: an open-source Robot Operating System. ICRA Workshop on Open
+       Source Software, 3(3.2), 1-6.
+Redmon, J., Divvala, S., Girshick, R., & Farhadi, A. (2016). You Only Look Once: Unified,
+       Real-Time Object Detection. IEEE Conference on Computer Vision and Pattern
+       Recognition (CVPR), 779-788. https://doi.org/10.1109/CVPR.2016.91
+
+
+
+
+                                                                                           31
+Lista de Acrónimos y Abreviaturas
+
+        ACID    Atomicity, Consistency, Isolation, Durability.
+        APA     American Psychological Association.
+        API     Application Programming Interface. xiii, 2, 9, 11,
+                13–15, 19, 20, 25
+        AWS     Amazon Web Services.
+        CD      Continuous Delivery.
+        CDN     Content Delivery Network.
+        CI      Continuous Integration.
+        CLI     Command Line Interface.
+        CNN     Convolutional Neural Network. 5
+        CORS    Cross-Origin Resource Sharing. 22
+        CPU     Central Processing Unit. 12
+        CRUD    Create, Read, Update, Delete.
+        CSS     Cascading Style Sheets.
+        DBMS    Database Management System.
+        DDS     Data Distribution Service. 3
+        DL      Deep Learning.
+        DNS     Domain Name System.
+        EPS     Escuela Politécnica Superior.
+        FSM     Finite State Machine. 9, 18, 19, 23
+        GAN     Generative Adversarial Network.
+        GCP     Google Cloud Platform.
+        GPU     Graphics Processing Unit. 5, 12, 19
+        GUI     Graphical User Interface.
+        HTML    HyperText Markup Language.
+        HTTP    HyperText Transfer Protocol. 22
+        HTTPS   HyperText Transfer Protocol Secure.
+        IA      Inteligencia Artificial.
+        IaaS    Infrastructure as a Service.
+        IDE     Integrated Development Environment.
+        IEEE    Institute of Electrical and Electronics Engineers.
+        IETF    Internet Engineering Task Force.
+        IoT     Internet of Things.
+        IP      Internet Protocol.
+        ISO     International Organization for Standardization.
+        JSON    JavaScript Object Notation.
+        JWT     JSON Web Token. 10, 13, 15, 18, 19, 22, 24, 25, 29
+        K8s     Kubernetes.
+
+
+
+                                                                     33
+34                                         Lista de Acrónimos y Abreviaturas
+
+
+     LiDAR   Light Detection and Ranging. 4, 6, 12
+     LLM     Large Language Model.
+     LSTM    Long Short-Term Memory.
+     ML      Machine Learning.
+     MVC     Model-View-Controller.
+     MVVM    Model-View-ViewModel.
+     Nav2    ROS 2 Navigation Stack. xiii, 2, 4, 7, 9, 12, 22, 23,
+             29
+     NLP     Natural Language Processing.
+     NoSQL   Not Only SQL.
+     OAuth   Open Authorization.
+     ORM     Object-Relational Mapping. 13, 15, 20
+     PaaS    Platform as a Service.
+     R-CNN   Region-based Convolutional Neural Network. 5
+     RBAC    Role-Based Access Control. 22
+     REST    Representational State Transfer. xiii, 2, 6, 9, 14, 15,
+             19, 20, 25
+     RNN     Recurrent Neural Network.
+     ROS 2   Robot Operating System 2. v, xiii, 1–4, 6, 7, 11, 12,
+             14, 15, 19, 22, 25, 39
+     S3      Simple Storage Service. 13, 15
+     SaaS    Software as a Service.
+     SDK     Software Development Kit. 13
+     SLAM    Simultaneous Localization and Mapping. xiii, 2, 4, 6,
+             7, 9, 12, 29
+     SPA     Single Page Application.
+     SQL     Structured Query Language. 13
+     SSL     Secure Sockets Layer.
+     TCP     Transmission Control Protocol.
+     TDD     Test-Driven Development.
+     TFG     Trabajo Fin de Grado.
+     TFM     Trabajo Fin de Máster.
+     TLS     Transport Layer Security.
+     TOFU    Trust On First Use. 10, 15, 18–20, 25, 29
+     TSDB    Time-Series Database. 13
+     UA      Universidad de Alicante.
+     UDP     User Datagram Protocol.
+     URI     Uniform Resource Identifier.
+     URL     Uniform Resource Locator. 18, 21, 22
+     VPN     Virtual Private Network.
+     W3C     World Wide Web Consortium.
+     XML     eXtensible Markup Language.
+     YOLO    You Only Look Once. xiii, 2, 5–7, 9, 12, 15, 22, 29
+Glosario de Términos
+A
+
+algoritmo Conjunto ordenado y finito de operaciones que permite hallar la solución de un
+     problema. Los algoritmos son la base de la programación y definen los pasos lógicos
+     para resolver tareas computacionales.
+
+B
+
+backend Parte del software que procesa la entrada desde el frontend, gestiona la lógica de
+    negocio y se comunica con la base de datos. También conocido como lado del servidor.
+
+C
+
+cifrado Proceso de codificación de información para que solo las partes autorizadas puedan
+     acceder a ella. Puede ser simétrico (misma clave) o asimétrico (par de claves públi-
+     ca/privada).
+
+compilador Programa informático que traduce código escrito en un lenguaje de progra-
+    mación (código fuente) a otro lenguaje (código objeto), típicamente código máquina
+    ejecutable.
+
+D
+
+deploy Proceso de poner una aplicación o actualización a disposición de los usuarios fi-
+     nales. Incluye la instalación, configuración y activación del software en el entorno de
+     producción.
+
+E
+
+entorno Bloque de código en LATEX delimitado por \begin{nombre} y \end{nombre}. Define
+     un contexto especial para el contenido.
+
+escalabilidad Capacidad de un sistema para manejar una cantidad creciente de trabajo, o
+     su potencial para ser ampliado para acomodar ese crecimiento. Puede ser vertical (más
+     recursos) u horizontal (más instancias).
+
+F
+
+firewall Sistema de seguridad de red que monitoriza y controla el tráfico de red entrante y
+     saliente según reglas de seguridad predeterminadas.
+
+flotante Elemento (figura o tabla) que LATEX puede mover de su posición en el código fuente
+     para optimizar la maquetación. Se controla con especificadores como [htbp].
+
+
+
+                                                                                         35
+36                                                                 Glosario de Términos
+
+
+framework Estructura conceptual y tecnológica de soporte definido, normalmente con ar-
+    tefactos o módulos de software concretos, que puede servir de base para la organización
+    y desarrollo de software.
+
+frontend Parte del software que interactúa directamente con el usuario. Incluye la interfaz
+     gráfica, formularios y todos los elementos visuales de una aplicación.
+
+H
+
+hash Función que convierte una entrada de datos de cualquier tamaño en una salida de
+    tamaño fijo. Se usa para verificar integridad de datos y almacenar contraseñas de forma
+    segura.
+
+I
+
+índice Estructura de datos que mejora la velocidad de las operaciones de búsqueda en una
+     tabla de base de datos, a costa de espacio adicional y tiempo de escritura.
+
+intérprete Programa que ejecuta instrucciones escritas en un lenguaje de programación
+     línea por línea, sin necesidad de compilación previa. Python y JavaScript son ejemplos
+     de lenguajes interpretados.
+
+L
+
+latencia Tiempo que transcurre desde que se envía una solicitud hasta que se recibe la
+     respuesta. En sistemas distribuidos, se mide típicamente en milisegundos.
+
+M
+
+macro Comando definido por el usuario en LATEX que representa una secuencia de instruc-
+    ciones. Permite automatizar tareas repetitivas y crear abstracciones.
+
+microservicio Estilo arquitectónico que estructura una aplicación como una colección de
+    servicios pequeños, autónomos y débilmente acoplados. Cada microservicio implementa
+    una funcionalidad de negocio específica.
+
+middleware Software que actúa como puente entre el sistema operativo o base de datos y
+    las aplicaciones, especialmente en una red. Facilita la comunicación y gestión de datos
+    entre sistemas distribuidos.
+
+monolito Arquitectura de software donde todos los componentes de la aplicación están
+    interconectados y son interdependientes, desplegándose como una única unidad.
+
+N
+
+normalización Proceso de organización de datos en una base de datos relacional para redu-
+    cir la redundancia y mejorar la integridad de los datos. Incluye varias formas normales
+    (1NF, 2NF, 3NF, BCNF).
+Glosario de Términos                                                                      37
+
+
+P
+
+pipeline Secuencia automatizada de pasos para compilar, probar y desplegar software. En
+     CI/CD, los pipelines automatizan el flujo desde el código fuente hasta producción.
+
+preámbulo Parte del documento LATEX entre \documentclass y \begin{document}. Con-
+    tiene la configuración del documento y la carga de paquetes.
+
+Q
+
+query Consulta o solicitud de datos a una base de datos. En SQL, las queries se escriben
+    usando comandos como SELECT, INSERT, UPDATE y DELETE.
+
+R
+
+refactorización Proceso de reestructurar código existente sin cambiar su comportamiento
+     externo. Mejora la legibilidad, reduce la complejidad y facilita el mantenimiento.
+
+S
+
+sprint Período de tiempo fijo (generalmente 2-4 semanas) durante el cual se completa un
+     conjunto específico de trabajo en metodologías ágiles como Scrum.
+
+T
+
+throughput Cantidad de datos o transacciones que un sistema puede procesar en una unidad
+     de tiempo. Es una medida clave del rendimiento de sistemas.
+
+token Cadena de caracteres que representa una credencial de seguridad o sesión. En auten-
+     ticación, los tokens permiten verificar la identidad sin transmitir contraseñas.
+
+transacción Unidad lógica de trabajo en una base de datos que debe completarse en su
+     totalidad o no ejecutarse en absoluto. Las transacciones garantizan la integridad de los
+     datos.
+A. Manual de despliegue
+  Este anexo describe el procedimiento para desplegar el sistema en un entorno de desarrollo.
+El repositorio se organiza como un monorepo cuya estructura de alto nivel se muestra a
+continuación.
+
+   FOLDER Estructura del repositorio
+
+   FOLDER-OPEN tfg-robot-patrulla/
+               FOLDER-OPEN backend/
+               FOLDER-OPEN flutter_frontend/
+               FOLDER-OPEN robot_ws/
+               FOLDER-OPEN scripts/
+               FOLDER-OPEN docs/
+
+
+   Cada directorio agrupa, respectivamente, el backend y sus consumidores de eventos (backend),
+la aplicación de usuario (flutter_frontend), el workspace de ROS 2 con los nodos del ro-
+bot (robot_ws), los scripts de automatización del despliegue (scripts) y la documentación,
+incluida esta memoria (docs).
+
+
+A.1. Requisitos previos
+  El despliegue requiere un sistema con Docker y Docker Compose para la infraestructura
+de datos, Python para el backend, el SDK de Flutter para la aplicación de usuario y una
+instalación de ROS 2 Humble para la capa robótica. El conjunto de scripts incluido en el
+directorio scripts/ automatiza la comprobación de prerrequisitos y el arranque de cada
+componente.
+
+
+A.2. Procedimiento de despliegue
+  El sistema se levanta por capas, respetando el orden de dependencias. En primer lugar se
+comprueban los prerrequisitos y se arranca la infraestructura de datos (bus de mensajería,
+bases de datos y almacenamiento de objetos); a continuación se preparan y ejecutan el backend
+y la aplicación de usuario; por último, se construye y se lanza la capa robótica.
+
+                                  Despliegue de la infraestructura y el backend
+
+   1   ./scripts/00_prereqs.sh                    # Comprobación de prerrequisitos
+   2   ./scripts/10_infra_up.sh                   # Infraestructura de datos (Docker Compose)
+   3   ./scripts/01_backend_setup.sh              # Preparación del entorno del backend
+   4   ./scripts/11_seed.sh                       # Carga de datos iniciales
+
+
+
+
+                                                                                                39
+40                                                                   Manual de despliegue
+
+
+
+     5   ./scripts/20_backend_run.sh    # Arranque del backend
+
+   Una vez disponibles la infraestructura y el backend, se arranca la aplicación de usuario y,
+finalmente, la capa robótica sobre el robot.
+
+                        Despliegue del frontend y de la capa robótica
+
+     1   ./scripts/30_frontend_run.sh   # Aplicación de usuario (Flutter)
+     2   ./scripts/41_robot_build.sh    # Construcción del workspace ROS 2
+     3   ./scripts/42_robot_run.sh      # Arranque de los nodos del robot
+
+
+
+A.3. Configuración mediante variables de entorno
+  Los parámetros sensibles y dependientes del entorno (credenciales de las bases de datos,
+direcciones del bus de mensajería, identificador del robot y claves de acceso al almacena-
+miento de objetos) se gestionan mediante variables de entorno, a partir de las plantillas
+.env.example incluidas en el repositorio. Antes del primer arranque debe crearse el fichero
+.env correspondiente y completarse con los valores adecuados.
+

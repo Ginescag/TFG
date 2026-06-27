@@ -41,6 +41,8 @@ dependencies:
   shared_preferences: ^2.3.3
   shadcn_ui: ^0.53.6
   url_launcher: ^6.3.0
+  video_player: ^2.9.2
+  chewie: ^1.8.5
 
 dev_dependencies:
   flutter_test:

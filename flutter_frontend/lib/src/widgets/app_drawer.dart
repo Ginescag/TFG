@@ -21,14 +21,7 @@ class AppDrawer extends ConsumerWidget {
           DrawerHeader(
             decoration: BoxDecoration(color: primary.withOpacity(0.1)),
             child: Center(
-              child: Text(
-                'Menu',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: primary,
-                ),
-              ),
+              child: Image.asset('assets/warden_logo.png', height: 96),
             ),
           ),
           _drawerItem(
@@ -94,10 +87,7 @@ class AppDrawer extends ConsumerWidget {
           Navigator.pop(context);
           context.go(route);
         },
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: Text(label),
-        ),
+        child: Align(alignment: Alignment.centerLeft, child: Text(label)),
       ),
     );
   }

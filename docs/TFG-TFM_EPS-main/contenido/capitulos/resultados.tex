@@ -1,0 +1,159 @@
+\chapter{Resultados}
+\label{cap:resultados}
+
+Este capítulo presenta los resultados del trabajo. La validación realizada hasta el
+momento es de carácter \textbf{funcional}: se ha comprobado, en un entorno de simulación,
+que el ciclo completo del sistema opera de extremo a extremo, desde el arranque del robot
+hasta la notificación de incidencias en la aplicación. La campaña de medición
+\textbf{cuantitativa} sobre hardware real, en cambio, queda pendiente. En consecuencia,
+este capítulo describe el entorno y el alcance de la validación funcional ya realizada y
+deja reservados, mediante avisos explícitos, los apartados que se completarán con la
+campaña de medición.
+
+%% =============================================================================
+\section{Entorno y escenario de pruebas}
+\label{sec:entorno-pruebas}
+
+La validación funcional se ha llevado a cabo en simulación, sobre el modelo del
+\mbox{TurtleBot~4} ejecutado en \textit{Gazebo}, con \textit{RViz} como herramienta de
+visualización del estado del robot, los sensores y el mapa. Este entorno reproduce una
+estancia cerrada e integra la misma pila de software que se ejecutaría sobre el robot
+físico (\gls{ros} Humble, \gls{nav2}, \texttt{slam\_toolbox} y \texttt{explore\_lite}), de
+modo que los nodos propios del proyecto y el backend operan sin cambios respecto al
+despliegue real. Esta equivalencia permite ejercitar la lógica completa del sistema (la
+máquina de estados del orquestador, la generación de la ruta, la detección y los flujos de
+datos) sin depender todavía del hardware.
+
+\begin{notebox}{Pendiente de la campaña de pruebas}
+  La descripción del escenario físico definitivo (dimensiones de la estancia, disposición
+  de los obstáculos y condiciones de iluminación) y la figura del mapa generado durante la
+  exploración se incorporarán tras la ejecución de las pruebas sobre el robot real.
+\end{notebox}
+
+%% =============================================================================
+\section{Validación funcional}
+\label{sec:validacion-funcional}
+
+En el estado actual del trabajo, la validación se ha orientado a verificar la correcta
+integración de los subsistemas y la coherencia de los flujos de datos entre el robot, el
+bus de eventos, el backend y la aplicación de usuario. Sobre el entorno de simulación se ha
+ejercitado el ciclo operativo completo, comprobando que cada flujo descrito en el
+Capítulo~\ref{cap:desarrollo} se ejecuta de principio a fin y produce el efecto esperado en
+los almacenes de datos y en la interfaz.
+
+En particular, se ha confirmado que el robot explora el entorno y construye su mapa, que la
+\gls{fsm} encadena de forma autónoma las fases del ciclo (exploración, guardado,
+planificación y patrulla), que la ruta de cobertura se deriva del mapa y se recorre de forma
+cíclica, y que la detección de una persona dispara el registro de una incidencia con su
+vídeo asociado. Asimismo, se ha verificado que la telemetría llega a InfluxDB y se visualiza
+en Grafana, y que las órdenes emitidas desde la aplicación (iniciar, detener y reinstalar la
+patrulla) se propagan hasta el robot y se reflejan en su estado. La
+tabla~\ref{tab:validacion} resume estas comprobaciones.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Resumen de la validación funcional realizada en simulación. Fuente:
+  elaboración propia.}
+  \label{tab:validacion}
+  \begin{tabular}{@{}>{\raggedright\arraybackslash}p{4.3cm}
+                     >{\raggedright\arraybackslash}p{6.2cm}
+                     >{\raggedright\arraybackslash}p{2.7cm}@{}}
+    \toprule
+    \textbf{Flujo o prueba} & \textbf{Cobertura} & \textbf{Resultado} \\
+    \midrule
+    Autenticación del robot & \gls{tofu}, autenticación y refresco del \gls{jwt} &
+    Verificado (sim.) \\
+    \addlinespace[3pt]
+    Exploración y mapeo & \texttt{explore\_lite} y \texttt{slam\_toolbox} &
+    Verificado (sim.) \\
+    \addlinespace[3pt]
+    Guardado del mapa & Servicio \texttt{map\_saver} &
+    Verificado (sim.) \\
+    \addlinespace[3pt]
+    Generación de la ruta & Barrido en zig-zag sobre el mapa &
+    Verificado (sim.) \\
+    \addlinespace[3pt]
+    Patrulla cíclica & Recorrido de \textit{waypoints} con \gls{nav2} &
+    Verificado (sim.) \\
+    \addlinespace[3pt]
+    Detección de incidencia & \gls{yolo} $\rightarrow$ MinIO $\rightarrow$ Kafka
+    $\rightarrow$ registro & Verificado (sim.) \\
+    \addlinespace[3pt]
+    Telemetría & \texttt{serve\_telemetry} $\rightarrow$ InfluxDB $\rightarrow$ Grafana &
+    Verificado (sim.) \\
+    \addlinespace[3pt]
+    Control desde la aplicación & Iniciar, detener y reinstalar la patrulla &
+    Verificado (sim.) \\
+    \addlinespace[3pt]
+    Estado operativo & \textit{Heartbeat} $\rightarrow$ PostgreSQL $\rightarrow$ app &
+    Verificado (sim.) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Conviene precisar el alcance de estas comprobaciones: confirman que la arquitectura es
+coherente y que los subsistemas se integran según el diseño, pero no constituyen una
+medición del rendimiento. La calidad de la navegación, la fiabilidad del detector en
+condiciones reales y la latencia del sistema son magnitudes que solo pueden cuantificarse
+sobre el hardware objetivo, y se abordan en la sección siguiente.
+
+%% =============================================================================
+\section{Métricas previstas y estado de la medición}
+\label{sec:metricas-resultados}
+
+Para completar la evaluación se prevé recoger las métricas definidas en la
+Sección~\ref{sec:metricas}, organizadas en tres dimensiones. La \textbf{navegación y
+patrulla} se valorará mediante la tasa de éxito en alcanzar las poses objetivo (porcentaje
+de \textit{waypoints} alcanzados sin intervención) y la ausencia de colisiones durante el
+recorrido. La \textbf{detección de incidencias} se medirá a partir de la confianza media de
+las detecciones y del recuento de falsos positivos y falsos negativos sobre un conjunto de
+situaciones controladas. El \textbf{rendimiento de extremo a extremo} se cuantificará como
+la latencia desde que se produce la detección en el robot hasta que la incidencia queda
+registrada y es visible para el usuario, junto con la regularidad del envío de telemetría.
+La tabla~\ref{tab:resultados-pendientes} recoge la plantilla prevista para estos valores.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Plantilla de métricas de evaluación previstas. Fuente: elaboración
+  propia.}
+  \label{tab:resultados-pendientes}
+  \begin{tabular}{@{}lll@{}}
+    \toprule
+    \textbf{Métrica} & \textbf{Unidad} & \textbf{Valor} \\
+    \midrule
+    Tasa de éxito de la patrulla   & \% de poses alcanzadas & n/d \\
+    Confianza media de detección   & [0, 1]                 & n/d \\
+    Falsos positivos               & detecciones/hora       & n/d \\
+    Falsos negativos               & \% de no detectados    & n/d \\
+    Latencia detección-registro    & ms                     & n/d \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{notebox}{Pendiente de la campaña de pruebas}
+  Los valores de la tabla~\ref{tab:resultados-pendientes} se obtendrán al ejecutar la
+  campaña de medición sobre el robot real. Una vez disponibles, esta sección incorporará su
+  análisis e interpretación, así como la comparación con los valores de referencia que
+  procedan.
+\end{notebox}
+
+%% =============================================================================
+\section{Discusión}
+\label{sec:discusion}
+
+Aunque los resultados cuantitativos están pendientes, la validación funcional realizada
+permite afirmar que la arquitectura propuesta es coherente y que sus componentes se integran
+según el diseño previsto. El desacoplamiento mediante el bus de eventos ha facilitado el
+desarrollo y la prueba de cada subsistema por separado: cada flujo se ha podido ejercitar de
+forma aislada y, después, en conjunto, sin que la indisponibilidad puntual de un componente
+bloqueara a los demás. Este comportamiento respalda la decisión de diseño adoptada.
+
+No obstante, la validación en simulación tiene límites que conviene reconocer. El entorno
+simulado no reproduce con fidelidad la dinámica del robot real, el ruido de los sensores ni
+las condiciones de iluminación, factores que inciden directamente tanto en la navegación
+como en la percepción. Por ello, las principales incógnitas que la evaluación cuantitativa
+deberá despejar son el comportamiento de la navegación en presencia de obstáculos dinámicos,
+la fiabilidad del detector en condiciones reales de iluminación y la latencia del flujo
+completo de notificación. Estas cuestiones se retoman, junto con las limitaciones del
+trabajo, en el Capítulo~\ref{cap:conclusiones}.

@@ -1,0 +1,106 @@
+\chapter{Introducción}
+\label{cap:introduccion}
+
+La protección y la supervisión de espacios interiores son una necesidad constante
+en entornos tan diversos como oficinas, naves industriales, almacenes o viviendas.
+Este capítulo enmarca el trabajo en ese ámbito: se argumenta la importancia y la
+actualidad del problema, se delimita el reto técnico que se aborda y se enuncia el
+propósito del presente Trabajo Fin de Grado, para terminar describiendo la
+organización de la memoria.
+
+%% =============================================================================
+\section{Importancia y actualidad de la temática}
+\label{sec:importancia-actualidad}
+
+La vigilancia de espacios interiores cerrados se apoya tradicionalmente en redes
+de cámaras fijas y en la supervisión por parte de personal de seguridad. Ambos
+recursos presentan limitaciones conocidas: las cámaras fijas solo cubren los
+ángulos en los que se han instalado y dejan zonas ciegas, y la atención humana
+sostenida sobre múltiples monitores resulta costosa y propensa a la fatiga. Como
+consecuencia, una parte de los eventos relevantes puede pasar inadvertida o
+detectarse con retraso, justo cuando una respuesta temprana es más valiosa.
+
+El interés por automatizar esta tarea es especialmente vigente hoy en día. En los
+últimos años, la robótica móvil ha alcanzado un grado de madurez que
+permite delegar parte de la vigilancia en plataformas autónomas: la consolidación
+de \gls{ros} como middleware estándar para el desarrollo de aplicaciones
+robóticas, con despliegues reales documentados \parencite{macenski2022ros2}, junto
+con la aparición de pilas de navegación robustas \parencite{macenski2020nav2} y de
+hardware asequible, ha rebajado de forma notable la barrera de entrada. De manera
+complementaria, los detectores de objetos en tiempo real basados en redes
+neuronales convolucionales \parencite{redmon2016yolo}, hoy disponibles en
+implementaciones eficientes y de uso extendido \parencite{jocher2023ultralytics},
+hacen viable dotar a un robot de una capacidad de percepción suficiente para
+identificar situaciones de interés mientras se desplaza.
+
+La convergencia de ambos avances habilita un modelo de vigilancia activa, en el
+que un agente móvil recorre el espacio de forma autónoma y reclama la atención del
+operador únicamente ante los eventos que detecta. Frente al esquema pasivo de la
+cámara fija, este enfoque amplía la cobertura efectiva con un único dispositivo en
+movimiento y filtra la información que llega al usuario. Es en esta ventana de oportunidad 
+donde se sitúa el presente trabajo.
+
+%% =============================================================================
+\section{Planteamiento del problema}
+\label{sec:planteamiento-problema}
+
+Construir un robot de patrulla autónoma para interiores no constituye un problema
+único, sino la integración coordinada de varios subproblemas. El robot debe
+cartografiar un entorno inicialmente desconocido, planificar una ruta que cubra el
+espacio de forma razonable \parencite{galceran2013coverage}, navegar evitando
+obstáculos, percibir la presencia de personas y comunicar las incidencias a un
+sistema con el que el usuario pueda interactuar. Cada una de estas capacidades
+descansa en tecnologías distintas (navegación, percepción, mensajería, servicios
+web y aplicaciones de usuario) que rara vez comparten el mismo plano de ejecución.
+
+El reto principal, por tanto, no es resolver cada subproblema de manera aislada,
+sino integrarlos en un sistema coherente que sea a la vez funcional, seguro y
+mantenible. Un acoplamiento excesivo entre el robot y el servidor, en el que cada extremo
+depende de la disponibilidad inmediata del otro, penalizaría la escalabilidad y
+la robustez del sistema y elevaría el consumo de recursos de una plataforma con
+autonomía energética limitada. De ahí la necesidad
+de crear una arquitectura que desacople la capa física del robot del plano de control y
+de los servicios de usuario.
+
+%% =============================================================================
+\section{Propósito y finalidad del trabajo}
+\label{sec:proposito}
+
+El propósito de este Trabajo Fin de Grado es diseñar e implementar un sistema
+robótico de patrulla autónoma para estancias cerradas que dé respuesta al problema
+anterior, construido sobre un robot \mbox{TurtleBot~4} y \gls{ros}. El sistema
+cartografía el entorno mediante \gls{slam}, deriva del mapa resultante una ruta de
+cobertura y la recorre con la pila de navegación \gls{nav2}. Durante el recorrido,
+un módulo de percepción basado en \gls{yolo} detecta la presencia de personas,
+graba un clip del evento y lo registra como incidencia.
+
+La finalidad última no es solo que el robot patrulle, sino demostrar la viabilidad
+de una arquitectura distribuida y orientada a eventos que integre la capa
+robótica, el procesamiento a bordo y los servicios web en un único sistema
+funcional, extensible y seguro. La comunicación entre el robot y el resto del
+sistema se resuelve mediante un bus de mensajería \parencite{kreps2011kafka} que
+desacopla el hardware del backend, de modo que el robot solo transmite
+información cuando se produce un evento relevante. Un servidor
+desarrollado con FastAPI consume estos eventos, persiste la información y expone
+una \gls{api} \gls{rest} que una aplicación \mbox{Flutter} emplea para que el
+usuario controle la patrulla y revise el historial de incidencias. El proyecto se
+organiza en cuatro bloques diferenciados (capa robótica,
+infraestructura de datos, backend y aplicación de usuario) desplegables mediante
+contenedores.
+
+%% =============================================================================
+\section{Estructura de la memoria}
+\label{sec:estructura-memoria}
+
+El resto del documento se organiza como sigue. El
+Capítulo~\ref{cap:marco-teorico} revisa los fundamentos teóricos y el estado del
+arte en navegación autónoma, percepción visual y arquitecturas orientadas a
+eventos. El Capítulo~\ref{cap:objetivos} formula el objetivo general y los
+objetivos específicos del trabajo. El Capítulo~\ref{cap:metodologia} describe la
+metodología de desarrollo, las herramientas empleadas y los criterios de
+evaluación previstos. El Capítulo~\ref{cap:desarrollo} constituye el núcleo
+técnico de la memoria y detalla la arquitectura del sistema y la implementación
+de cada uno de sus subsistemas. El Capítulo~\ref{cap:resultados} presenta los
+resultados obtenidos y su análisis. Finalmente, el
+Capítulo~\ref{cap:conclusiones} recoge las conclusiones, las limitaciones
+detectadas y las líneas de trabajo futuro.

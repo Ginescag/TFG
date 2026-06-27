@@ -5,11 +5,7 @@ class SessionData {
   final String role;
   final int userId;
 
-  SessionData({
-    required this.token,
-    required this.role,
-    required this.userId,
-  });
+  SessionData({required this.token, required this.role, required this.userId});
 }
 
 class SessionStorage {

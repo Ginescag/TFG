@@ -1,0 +1,244 @@
+\chapter{Marco teórico}
+\label{cap:marco-teorico}
+
+Este capítulo presenta los fundamentos teóricos sobre los que se sustenta el
+trabajo y revisa el estado del arte de las disciplinas implicadas. Se abordan,
+en primer lugar, el middleware robótico y el problema de la localización y el
+mapeado; a continuación, la navegación autónoma y la planificación de rutas de
+cobertura; después, la detección de objetos mediante visión por computador; y,
+por último, las arquitecturas orientadas a eventos. El capítulo concluye
+situando la propuesta respecto a los trabajos relacionados.
+
+%% =============================================================================
+\section{Robótica móvil autónoma y ROS 2}
+\label{sec:ros2}
+
+\gls{ros} es un middleware de código abierto para el desarrollo de aplicaciones
+robóticas que proporciona un modelo de comunicación entre procesos, herramientas
+de construcción y un ecosistema amplio de paquetes reutilizables. Su primera
+generación se introdujo con el objetivo de favorecer la reutilización de
+software en investigación robótica \parencite{quigley2009ros}. Sin embargo, su
+diseño, articulado en torno a un nodo maestro que coordinaba el descubrimiento
+entre procesos, presentaba limitaciones para los entornos de producción, los
+sistemas con varios robots y las aplicaciones con requisitos de tiempo real. La
+segunda generación, \gls{ros}, rediseña la arquitectura para superar esas
+carencias: elimina el maestro centralizado y delega el descubrimiento y el
+transporte de mensajes en el estándar \gls{dds}, lo que aporta una comunicación
+descentralizada, control de la calidad de servicio de los enlaces y mejor
+soporte para despliegues distribuidos \parencite{macenski2022ros2}.
+
+El modelo de programación de \gls{ros} se organiza en torno a \textit{nodos},
+procesos independientes que encapsulan una funcionalidad concreta y se comunican
+mediante el paso de mensajes. Los nodos intercambian flujos de datos a través de
+\textit{topics} con un patrón de publicación-suscripción, invocan operaciones
+puntuales mediante \textit{servicios} de tipo petición-respuesta y gestionan
+tareas de larga duración, con realimentación y posibilidad de cancelación,
+mediante \textit{acciones}. Sobre el transporte \gls{dds}, cada enlace puede
+ajustar parámetros de calidad de servicio, como la fiabilidad de la entrega o la
+persistencia de los últimos valores publicados, lo que permite adaptar la
+comunicación tanto a sensores de alta frecuencia como a eventos esporádicos.
+
+Más allá del modelo de comunicación, \gls{ros} ofrece un sistema de construcción
+y empaquetado, un mecanismo de parámetros para configurar los nodos en tiempo de
+ejecución y un sistema de lanzamiento que describe cómo arrancar y orquestar
+conjuntos de nodos. Esta separación en componentes débilmente acoplados favorece
+la modularidad, permite reutilizar paquetes mantenidos por la comunidad y hace
+posible sustituir una pieza sin alterar el resto del sistema. 
+El diseño de este trabajo sigue ese principio de forma explícita, donde cada 
+capacidad del robot (telemetría, percepción, navegación, distribución de secretos y
+patrulla) reside en un nodo especializado y encapsulado.
+
+%% =============================================================================
+\section{Localización y mapeado simultáneos (SLAM)}
+\label{sec:slam}
+
+Para navegar de forma autónoma, un robot necesita conocer tanto el mapa del
+entorno como su propia posición dentro de él. Cuando ninguno de los dos es
+conocido de antemano, el problema se formula como localización y mapeado
+simultáneos, o \gls{slam}: la construcción incremental de un mapa de un entorno
+desconocido a la vez que se estima la trayectoria del robot
+\parencite{durrantwhyte2006slam}. Se trata de un problema fundamental en
+robótica móvil porque ambas estimaciones son interdependientes, ya que un buen
+mapa requiere conocer la posición y una buena posición requiere conocer el mapa,
+y porque los errores de odometría se acumulan a lo largo del recorrido y
+producen deriva si no se corrigen.
+
+Una solución de \gls{slam} suele descomponerse en dos partes. El componente
+frontal procesa las medidas de los sensores y resuelve la asociación de datos,
+esto es, reconocer qué observaciones corresponden a un mismo elemento del
+entorno; el componente posterior estima la trayectoria y el mapa más coherentes
+con esas observaciones. La detección de cierres de bucle, que identifica lugares
+ya visitados, es determinante para corregir la deriva acumulada. Históricamente,
+las primeras formulaciones se apoyaban en filtros recursivos, como el filtro de
+Kalman extendido, mientras que los enfoques predominantes en la actualidad
+plantean el problema como la optimización de un grafo de poses, más preciso y
+escalable para trayectorias largas.
+
+Según el sensor empleado, se distingue entre el \gls{slam} visual, basado en
+cámaras, y el \gls{slam} láser, basado en un sensor \gls{lidar} que mide
+distancias mediante haces de luz. En el ámbito de \gls{ros}, una de las
+soluciones más extendidas para interiores es \textit{slam\_toolbox}, que
+implementa \gls{slam} láser basado en grafos de poses y permite tanto el mapeado
+en línea como la posterior localización sobre el mapa generado, además de guardar
+y recargar mapas previamente construidos \parencite{macenski2021slamtoolbox}. El
+presente trabajo emplea este enfoque para que el robot construya el mapa de la
+estancia durante una fase inicial de exploración.
+
+%% =============================================================================
+\section{Navegación autónoma y planificación de rutas de cobertura}
+\label{sec:navegacion}
+
+Una vez disponible el mapa, la navegación autónoma consiste en planificar y
+ejecutar trayectorias seguras hacia los objetivos deseados evitando obstáculos.
+En \gls{ros}, esta funcionalidad la proporciona \gls{nav2}, una pila de
+navegación que integra un planificador global, un controlador local y un conjunto
+de comportamientos de recuperación, coordinados mediante árboles de comportamiento
+(\textit{behavior trees}) \parencite{macenski2020nav2}. El planificador global
+calcula una ruta hasta el objetivo sobre una representación del entorno conocida
+como mapa de costes (\textit{costmap}), que combina los obstáculos del mapa con
+una zona de inflado de seguridad alrededor de ellos; el controlador local genera
+las órdenes de velocidad que siguen esa ruta mientras esquiva obstáculos
+imprevistos; y los comportamientos de recuperación intervienen cuando el robot
+queda bloqueado.
+
+El empleo de árboles de comportamiento, en lugar de una máquina de estados fija,
+dota a la navegación de una lógica de decisión modular y fácil de modificar, en
+la que pueden añadirse o reordenarse comportamientos sin reescribir el sistema.
+\gls{nav2} expone, además, interfaces de alto nivel para enviar al robot a una
+pose objetivo o a través de una secuencia ordenada de poses, una capacidad
+especialmente adecuada para las tareas de patrulla, en las que el robot debe
+recorrer una lista de puntos predefinidos.
+
+El recorrido sistemático de un espacio se corresponde con el problema de
+planificación de rutas de cobertura (\textit{coverage path planning}), que busca
+una trayectoria que haga pasar al robot por todas las regiones accesibles del
+entorno \parencite{galceran2013coverage}. Existen múltiples estrategias, desde las
+descomposiciones celulares, que dividen el espacio en regiones simples recorridas
+en barridos de ida y vuelta (\textit{boustrophedon}), hasta los métodos basados en
+rejilla o en árboles de expansión, y la elección entre ellas responde al
+compromiso entre completitud de la cobertura, longitud de la ruta y coste de
+cálculo. En este trabajo se adopta una aproximación sencilla basada en una rejilla
+de puntos sobre el espacio libre del mapa, recorrida en zig-zag, que resulta
+suficiente para cubrir estancias cerradas de tamaño moderado.
+
+%% =============================================================================
+\section{Visión por computador y detección de objetos}
+\label{sec:vision}
+
+La detección de objetos consiste en localizar y clasificar las instancias de
+interés presentes en una imagen, devolviendo para cada una un recuadro
+delimitador (\textit{bounding box}) y una categoría con su grado de confianza. Los
+métodos modernos se apoyan en redes neuronales convolucionales (\gls{cnn}),
+capaces de aprender directamente de los datos las características visuales
+relevantes. Tradicionalmente se distinguen dos familias: los detectores de dos
+etapas, como \gls{cnnobj}, que primero proponen regiones candidatas y después las
+clasifican, con alta precisión pero mayor coste computacional; y los detectores de
+una sola etapa, que resuelven la localización y la clasificación en una única
+pasada sobre la imagen.
+
+La familia \gls{yolo} pertenece a esta segunda categoría y supuso un avance
+decisivo al plantear la detección como un único problema de regresión sobre la
+imagen completa, dividida en una rejilla en la que cada celda predice recuadros y
+probabilidades de clase, lo que permitió alcanzar velocidades adecuadas para el
+procesamiento en tiempo real \parencite{redmon2016yolo}. Un paso posterior de
+supresión (\textit{non-maximum suppression}) descarta las
+detecciones redundantes que se solapan sobre un mismo objeto. A lo largo de
+sucesivas versiones, \gls{yolo} ha mejorado la precisión y la eficiencia y ha
+reducido el tamaño de los modelos.
+
+Para su despliegue en plataformas con recursos limitados resulta habitual emplear
+las variantes más ligeras, que ofrecen un compromiso favorable entre precisión y
+coste computacional, frente a las variantes mayores que requieren una \gls{gpu}
+potente. En este trabajo se utiliza la versión \textit{nano} de \gls{yolo} en su
+implementación de Ultralytics \parencite{jocher2023ultralytics}, ejecutada en el
+propio robot para detectar la presencia de personas durante la patrulla. Este
+procesamiento en el propio robot (\textit{edge computing}) evita transmitir vídeo de
+forma continua a un servidor, reduce la carga de red y favorece la privacidad, al
+analizar las imágenes en el propio dispositivo.
+
+%% =============================================================================
+\section{Arquitecturas orientadas a eventos}
+\label{sec:arquitecturas-eventos}
+
+En los sistemas distribuidos, una arquitectura orientada a eventos organiza la
+comunicación en torno a la producción y el consumo de eventos a través de un
+intermediario de mensajería (\textit{broker}), en lugar de mediante llamadas
+directas entre componentes. Un evento es un registro inmutable de algo que ha
+sucedido, por ejemplo una lectura de telemetría o la detección de una incidencia.
+Este patrón desacopla a los productores de los consumidores: ambos desconocen su
+existencia mutua y se comunican únicamente a través del bus, de modo que añadir un
+nuevo consumidor no obliga a modificar al productor.
+
+Una de las plataformas de referencia para este propósito es Apache Kafka. Utilizado por empresas como Netflix, Spotify o Uber, 
+Kafka es un sistema de mensajería distribuido y persistente diseñado para procesar grandes
+volúmenes de flujos de datos con baja latencia \parencite{kreps2011kafka}. Kafka
+organiza los eventos en \textit{topics}, que a su vez se reparten en particiones
+para escalar de forma horizontal, y conserva los mensajes en un registro
+durante un periodo configurable. Esta persistencia permite que distintos
+consumidores lean el mismo flujo a su propio ritmo, e incluso reprocesen eventos
+pasados, una propiedad difícil de obtener con una comunicación síncrona y efímera.
+
+Este enfoque resulta especialmente adecuado para un robot de patrulla. Al publicar
+la telemetría y las incidencias como eventos, el robot solo transmite información
+cuando se produce algo relevante y no necesita mantener conexiones síncronas con
+el servidor ni esperar su respuesta, lo que reduce el consumo y mejora la
+tolerancia a desconexiones temporales. El servidor, por su parte, consume estos
+eventos a su propio ritmo y los distribuye al resto de la plataforma. Frente a un
+modelo basado únicamente en peticiones \gls{rest}, en el que el cliente debe
+preguntar de forma repetida por las novedades, el bus de eventos invierte el flujo
+y reparte mejor la carga. Este desacoplamiento es uno de los pilares del diseño
+propuesto.
+
+%% =============================================================================
+\section{Trabajos relacionados}
+\label{sec:trabajos-relacionados}
+
+La vigilancia mediante robots móviles autónomos cuenta con una trayectoria
+consolidada en la literatura. Ya en propuestas tempranas se integraban el
+mapeado, la localización y la navegación autónoma con tareas propias de la
+vigilancia, como la detección de objetos abandonados o el seguimiento de
+personas \parencite{dipaola2010surveillance}. Estos sistemas demostraron la
+viabilidad de delegar la inspección de un entorno interior en una plataforma
+autónoma y sentaron las bases sobre las que se apoyan los trabajos posteriores.
+
+Las propuestas más recientes incorporan el aprendizaje profundo para la
+percepción y se construyen sobre \gls{ros}. Existen robots de patrulla que
+combinan \gls{slam} láser con cámaras RGB-D y emplean detectores de la familia
+\gls{yolo} para generar mapas semánticos y evitar obstáculos durante el recorrido
+\parencite{chiang2026patrol}. En la línea de la detección de intrusos, otras
+propuestas despliegan flotas de robots coordinados bajo \gls{ros}, equipados con
+sensores \gls{lidar} bidimensionales, que agregan sus detecciones en un nodo
+central \parencite{islam2020intruder}. Estos trabajos confirman la idoneidad de
+la combinación de \gls{ros}, \gls{slam} y detección basada en redes neuronales,
+que también adopta el presente trabajo.
+
+No obstante, la mayoría de estas soluciones concentran su esfuerzo en la propia
+plataforma robótica, es decir, en la navegación y la percepción, y tratan de
+forma secundaria, cuando no omiten, la integración con servicios web, la
+persistencia y la gestión de las incidencias y la interacción con el usuario
+final a través de una aplicación. Muchas son, además, sistemas cerrados o
+difíciles de reproducir.
+
+La propuesta de este trabajo se diferencia por abordar el sistema de forma
+integral y con tecnologías abiertas: cubre desde la cartografía y la patrulla
+autónoma hasta la notificación de incidencias y su consulta desde una aplicación
+móvil, articulando todo ello mediante una arquitectura orientada a eventos. Esta
+visión de extremo a extremo, más que la novedad de cada componente por separado,
+constituye la aportación principal.
+
+%% =============================================================================
+\section{Síntesis y posicionamiento}
+\label{sec:sintesis}
+
+A lo largo del capítulo se han revisado tanto los fundamentos que sustentan el
+trabajo, \gls{ros} como middleware, el \gls{slam} para el mapeado, \gls{nav2}
+para la navegación, la detección de objetos con \gls{yolo} para la percepción y
+las arquitecturas orientadas a eventos para la comunicación, como los trabajos
+previos que abordan problemas afines. Cada una de esas tecnologías constituye una
+pieza madura y consolidada en su ámbito, y los sistemas de vigilancia robótica
+existentes confirman su aplicabilidad conjunta. Frente a esos trabajos, que
+suelen detenerse en la plataforma robótica, el valor del presente reside en
+integrar todas esas piezas, junto con el servidor y la aplicación de usuario, en
+un único sistema funcional de extremo a extremo, cuyo diseño y construcción se
+detallan en el Capítulo~\ref{cap:desarrollo}, tras formular los objetivos en el
+Capítulo~\ref{cap:objetivos}.

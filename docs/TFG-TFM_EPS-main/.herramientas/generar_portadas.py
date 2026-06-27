@@ -1,0 +1,488 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+generar_portadas.py
+--------------------------------------------------------------------------------
+Generador automático de imágenes de portadas para el README.
+
+Proyecto: Plantilla TFG/TFM EPS Universidad de Alicante
+Autor:    José Manuel Requena Plens
+Enlace:   https://github.com/jmrplens/TFG-TFM_EPS
+Licencia: GNU GPL v3.0
+Versión:  2.1.0
+--------------------------------------------------------------------------------
+
+Este script:
+1. Lee las titulaciones disponibles del archivo .cls
+2. Genera una portada en color para cada titulación
+3. Genera una mini-tabla con color y B/N para la titulación de referencia (teleco)
+4. Convierte a WebP y actualiza el README.md
+
+Autor: Plantilla TFG/TFM EPS UA
+Licencia: GPL-3.0
+"""
+
+import os
+import re
+import shutil
+import subprocess
+import sys
+import sys
+import tempfile
+import traceback
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from dataclasses import dataclass
+from multiprocessing import cpu_count
+from pathlib import Path
+from typing import Optional
+
+
+# =============================================================================
+# CONFIGURACIÓN
+# =============================================================================
+
+PROYECTO_ROOT = Path(__file__).parent.parent.resolve()
+CLS_FILE = PROYECTO_ROOT / "cls" / "eps-tfg.cls"
+README_FILE = PROYECTO_ROOT / "README.md"
+OUTPUT_DIR = PROYECTO_ROOT / ".github" / "images" / "portadas"
+
+# Titulación de referencia para la comparativa color/BN
+TITULACION_REFERENCIA = "teleco"
+
+# Configuración de imágenes
+DPI = 300  # Más bajo para thumbnails
+WEBP_QUALITY = 90
+HTML_CENTER_START = '<p align="center">'
+HTML_CENTER_END = '</p>\n'
+
+
+# =============================================================================
+# ESTRUCTURAS DE DATOS
+# =============================================================================
+
+@dataclass
+class Titulacion:
+    """Representa una titulación extraída del .cls"""
+    id: str
+    nombre: str
+    tipo: str  # tfg o tfm
+    color: str
+    texto: str  # blanco o negro
+    logo_portada: str
+    logo_normal: str
+
+
+# =============================================================================
+# PARSING DEL .CLS
+# =============================================================================
+
+def extraer_titulaciones(cls_path: Path) -> list[Titulacion]:
+    """Extrae todas las titulaciones definidas en el archivo .cls"""
+
+    contenido = cls_path.read_text(encoding="utf-8")
+
+    # Patrón para capturar definiciones de titulación
+    # \__eps_define_titulacion:nnnnnnn {id}
+    #   {nombre}
+    #   {tipo} {color} {texto} {logo-portada} {logo-normal}
+    patron = re.compile(
+        r'\\__eps_define_titulacion:nnnnnnn\s*\{([^}]+)\}\s*'
+        r'\{([^}]+)\}\s*'
+        r'\{([^}]+)\}\s*\{([^}]+)\}\s*\{([^}]+)\}\s*\{([^}]+)\}\s*\{([^}]+)\}',
+        re.MULTILINE
+    )
+
+    titulaciones = []
+    for match in patron.finditer(contenido):
+        t = Titulacion(
+            id=match.group(1).strip(),
+            nombre=match.group(2).strip().replace("~", " "),
+            tipo=match.group(3).strip(),
+            color=match.group(4).strip(),
+            texto=match.group(5).strip(),
+            logo_portada=match.group(6).strip(),
+            logo_normal=match.group(7).strip()
+        )
+        titulaciones.append(t)
+
+    return titulaciones
+
+
+# =============================================================================
+# GENERACIÓN DE PORTADAS
+# =============================================================================
+
+
+
+
+def generar_documento_portada_simple(titulacion: Titulacion, bn: bool = False) -> str:
+    """Genera un documento LaTeX simple que usa la clase directamente."""
+
+    # El comando es \portadacolor o \portadabn (sin argumento)
+    comando_portada = "\\portadabn" if bn else "\\portadacolor"
+
+    return f"""% !TeX program = lualatex
+% !TeX encoding = UTF-8
+% Generado automáticamente por generar_portadas.py
+
+\\documentclass{{eps-tfg}}
+\\usepackage{{eps-portadas}}
+
+\\EPSsetup{{
+    titulo = {{Título del Trabajo de Fin de {'Máster' if titulacion.tipo == 'tfm' else 'Grado'}}},
+    subtitulo = {{Subtítulo opcional}},
+    autor = {{Nombre Apellido1 Apellido2}},
+    genero = m,
+    tutor = {{Dr. Nombre del Tutor}},
+    tutor-departamento = {{Departamento Ejemplo}},
+    titulacion = {{{titulacion.id}}},
+    fecha = {{Febrero 2026}},
+}}
+
+\\begin{{document}}
+{comando_portada}
+\\end{{document}}
+"""
+
+
+def _limpiar_temporales(suffix: str):
+    """Limpia los archivos temporales generados."""
+    for ext in [".tex", ".pdf", ".png", ".log", ".aux", ".out", ".bcf", ".run.xml"]:
+        tmp = PROYECTO_ROOT / f"_temp_portada{suffix}{ext}"
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+
+
+def _generar_pdf(titulacion: Titulacion, bn: bool, suffix: str) -> bool:
+    """Genera el PDF de la portada."""
+    tex_file = PROYECTO_ROOT / f"_temp_portada{suffix}.tex"
+    pdf_file = PROYECTO_ROOT / f"_temp_portada{suffix}.pdf"
+
+    documento = generar_documento_portada_simple(titulacion, bn)
+    tex_file.write_text(documento, encoding="utf-8")
+
+    env = os.environ.copy()
+    # Usar rutas absolutas para cls y sty para que kpsewhich las encuentre
+    # Asegurar que termine en : para incluir rutas del sistema
+    texinputs = f".:{PROYECTO_ROOT}/cls:{PROYECTO_ROOT}/sty:{PROYECTO_ROOT}/recursos:{env.get('TEXINPUTS', '')}"
+    env["TEXINPUTS"] = texinputs
+
+    cmd = [
+        "lualatex",
+        "-shell-escape",
+        "-interaction=nonstopmode",
+        tex_file.name
+    ]
+
+    result = None
+    for _ in range(2):
+        result = subprocess.run(
+            cmd,
+            cwd=PROYECTO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=env
+        )
+
+    if not pdf_file.exists():
+        print(f"Error compiling {tex_file.name}:")
+        if result:
+            # Imprimir últimas líneas del log para no saturar
+            print("\n".join(result.stdout.splitlines()[-20:]))
+            print("\n".join(result.stderr.splitlines()[-20:]))
+        return False
+
+    return True
+
+
+def _convertir_a_imagen(titulacion: Titulacion, suffix: str, output_path: Path) -> Optional[dict]:
+    """Convierte el PDF generado a imagen (WebP/PNG)."""
+    pdf_file = PROYECTO_ROOT / f"_temp_portada{suffix}.pdf"
+    png_file = PROYECTO_ROOT / f"_temp_portada{suffix}.png"
+
+    # PDF -> PNG
+    subprocess.run([
+        "pdftoppm", "-png", "-r", str(DPI), "-singlefile",
+        str(pdf_file), str(PROYECTO_ROOT / f"_temp_portada{suffix}")
+    ], capture_output=True, timeout=60)
+
+    if not png_file.exists():
+        return None
+
+    # Convertir a WebP
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run([
+        "cwebp", "-q", str(WEBP_QUALITY), str(png_file), "-o", str(output_path)
+    ], capture_output=True, timeout=60)
+
+    if not output_path.exists():
+        shutil.copy(png_file, output_path.with_suffix(".png"))
+
+    # Construir info para resultados
+    return {
+        "id": titulacion.id,
+        "nombre": titulacion.nombre,
+        "tipo": titulacion.tipo,
+        "archivo": str(output_path.relative_to(PROYECTO_ROOT)),
+    }
+
+
+def _compilar_portada_worker(args: tuple) -> tuple:
+    """Worker para compilar una portada en paralelo."""
+    titulacion_dict, bn, output_path_str = args
+    output_path = Path(output_path_str)
+
+    # Reconstruir objeto Titulacion desde dict
+    titulacion = Titulacion(**titulacion_dict)
+    suffix = f"_{titulacion.id}{'_bn' if bn else '_color'}"
+
+    try:
+        if not _generar_pdf(titulacion, bn, suffix):
+            return (titulacion.id, bn, False, None)
+
+        info = _convertir_a_imagen(titulacion, suffix, output_path)
+
+        if not info:
+             return (titulacion.id, bn, False, None)
+
+        return (titulacion.id, bn, True, info)
+
+    except Exception:
+        traceback.print_exc()
+        return (titulacion.id, bn, False, None)
+
+    finally:
+        _limpiar_temporales(suffix)
+
+
+def compilar_portada(titulacion: Titulacion, bn: bool, output_path: Path) -> bool:
+    """Compila una portada y la convierte a WebP (versión secuencial)."""
+    result = _compilar_portada_worker((titulacion.__dict__, bn, str(output_path)))
+    return result[2]  # success
+
+
+def _preparar_tareas(titulaciones: list[Titulacion]) -> list[tuple]:
+    """Prepara las tareas de compilación."""
+    tareas = []
+    for t in titulaciones:
+        output_color = OUTPUT_DIR / f"portada_{t.id}_color.webp"
+        tareas.append((t.__dict__, False, str(output_color)))
+
+        if t.id == TITULACION_REFERENCIA:
+            output_bn = OUTPUT_DIR / f"portada_{t.id}_bn.webp"
+            tareas.append((t.__dict__, True, str(output_bn)))
+    return tareas
+
+
+def _procesar_resultado_futuro(futuro, resultados: dict, completadas: int, total_tareas: int) -> int:
+    """Procesa un futuro y devuelve 1 si hubo error, 0 si éxito."""
+    try:
+        tid, bn, success, info = futuro.result()
+
+        tipo_str = "(B/N)" if bn else ""
+        status = "✅" if success else "❌"
+        print(f"   [{completadas}/{total_tareas}] {tid} {tipo_str}... {status}")
+
+        if not (success and info):
+            return 1
+
+        if bn:
+            resultados["referencia_bn"] = info["archivo"]
+            color_path = OUTPUT_DIR / f"portada_{tid}_color.webp"
+            if color_path.exists():
+                resultados["referencia_color"] = str(color_path.relative_to(PROYECTO_ROOT))
+        else:
+            lista = resultados["grados"] if info["tipo"] == "tfg" else resultados["masteres"]
+            lista.append(info)
+        return 0
+
+    except Exception as e:
+        print(f"   [{completadas}/{total_tareas}] Error: {e}")
+        return 1
+
+
+def generar_todas_portadas(titulaciones: list[Titulacion]) -> dict:
+    """Genera todas las portadas y devuelve el mapeo de archivos."""
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    resultados = {
+        "grados": [],
+        "masteres": [],
+        "referencia_color": None,
+        "referencia_bn": None,
+    }
+
+    tareas = _preparar_tareas(titulaciones)
+    total_tareas = len(tareas)
+    num_workers = min(cpu_count(), 8, total_tareas)
+
+    completadas = 0
+    errores = 0
+
+    print(f"   Usando {num_workers} procesos paralelos para {total_tareas} portadas...")
+
+    with ProcessPoolExecutor(max_workers=num_workers) as executor:
+        futuros = {executor.submit(_compilar_portada_worker, tarea): tarea for tarea in tareas}
+
+        for futuro in as_completed(futuros):
+            completadas += 1
+            errores += _procesar_resultado_futuro(futuro, resultados, completadas, total_tareas)
+
+    # Ordenar resultados por ID para consistencia
+    resultados["grados"].sort(key=lambda x: x["id"])
+    resultados["masteres"].sort(key=lambda x: x["id"])
+
+    print(f"\n   ✅ Completadas: {completadas - errores}")
+    print(f"   ❌ Errores: {errores}")
+
+    return resultados
+
+
+# =============================================================================
+# ACTUALIZACIÓN DEL README
+# =============================================================================
+
+def generar_tabla_portadas(resultados: dict) -> str:
+    """Genera el markdown de la tabla de portadas."""
+
+    md = []
+
+    # Galería de portadas - todas en una tabla compacta
+    md.append("### Galería de Portadas\n")
+    md.append("Cada titulación tiene su propio diseño con colores y logotipos oficiales:\n")
+
+    # Grados
+    md.append("#### Grados\n")
+    md.append(HTML_CENTER_START)
+    for info in resultados["grados"]:
+        md.append(f'<img src="{info["archivo"]}" width="12%" title="{info["nombre"]}"></img>')
+    md.append(HTML_CENTER_END)
+
+    # Másteres
+    md.append("#### Másteres\n")
+    md.append(HTML_CENTER_START)
+    for info in resultados["masteres"]:
+        md.append(f'<img src="{info["archivo"]}" width="12%" title="{info["nombre"]}"></img>')
+    md.append(HTML_CENTER_END)
+
+    # Ejemplo color vs B/N
+    if resultados["referencia_color"] and resultados["referencia_bn"]:
+        md.append("### Ejemplo: Portada a color y B/N\n")
+        md.append(HTML_CENTER_START)
+        md.append(f'<img src="{resultados["referencia_color"]}" width="30%"></img>')
+        md.append(f'<img src="{resultados["referencia_bn"]}" width="30%"></img>')
+        md.append(HTML_CENTER_END)
+
+    return "\n".join(md)
+
+
+def actualizar_readme(resultados: dict):
+    """Actualiza la sección de portadas en el README."""
+
+    readme = README_FILE.read_text(encoding="utf-8")
+
+    # Buscar la sección de portadas
+    # Desde "### Galería de Portadas" hasta "### Comandos de Portada"
+    patron = re.compile(
+        r'(### Galería de Portadas[\s\S]*?)(### Comandos de Portada)'
+    )
+
+    nueva_seccion = generar_tabla_portadas(resultados)
+
+    if patron.search(readme):
+        readme_nuevo = patron.sub(nueva_seccion + r'\2', readme)
+    else:
+        # Si no existe, buscar después de "## 🎨 Portadas"
+        patron_portadas = re.compile(r'(## 🎨 Portadas\n+[\s\S]*?\n)(### )')
+        if patron_portadas.search(readme):
+            readme_nuevo = patron_portadas.sub(r'\1' + nueva_seccion + "### ", readme)
+        else:
+            print("⚠️  No se encontró la sección de portadas en el README")
+            return
+
+    README_FILE.write_text(readme_nuevo, encoding="utf-8")
+    print("✅ README actualizado")
+
+
+# =============================================================================
+# MAIN
+# =============================================================================
+
+def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Genera imágenes de portadas para el README"
+    )
+    parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Mostrar información detallada"
+    )
+    parser.add_argument(
+        "--no-update-readme",
+        action="store_true",
+        help="No actualizar el README.md"
+    )
+    parser.add_argument(
+        "--only",
+        type=str,
+        help="Generar solo una titulación específica"
+    )
+
+    args = parser.parse_args()
+
+    print("=" * 60)
+    print("🎨 Generador de Portadas para README")
+    print("=" * 60)
+    print()
+
+    # Verificar dependencias
+    for cmd in ["lualatex", "pdftoppm", "cwebp"]:
+        if not shutil.which(cmd):
+            print(f"❌ Error: '{cmd}' no encontrado. Instálalo primero.")
+            sys.exit(1)
+
+    # Extraer titulaciones del .cls
+    print("📖 Leyendo titulaciones del .cls...")
+    titulaciones = extraer_titulaciones(CLS_FILE)
+    print(f"   Encontradas: {len(titulaciones)} titulaciones")
+    print(f"   - Grados: {sum(1 for t in titulaciones if t.tipo == 'tfg')}")
+    print(f"   - Másteres: {sum(1 for t in titulaciones if t.tipo == 'tfm')}")
+    print()
+
+    # Filtrar si se especificó --only
+    if args.only:
+        titulaciones = [t for t in titulaciones if t.id == args.only]
+        if not titulaciones:
+            print(f"❌ Titulación '{args.only}' no encontrada")
+            sys.exit(1)
+
+    # Generar portadas
+    print("🔨 Generando portadas...")
+    resultados = generar_todas_portadas(titulaciones)
+    print()
+
+    # Resumen
+    total_ok = len(resultados["grados"]) + len(resultados["masteres"])
+    print("📊 Resumen:")
+    print(f"   ✅ Generadas: {total_ok}")
+    print(f"   ❌ Errores: {len(titulaciones) - total_ok}")
+    print()
+
+    # Actualizar README
+    if not args.no_update_readme and total_ok > 0:
+        print("📝 Actualizando README...")
+        actualizar_readme(resultados)
+
+    print()
+    print("✅ Completado")
+
+
+if __name__ == "__main__":
+    main()

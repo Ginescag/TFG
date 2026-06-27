@@ -6,13 +6,13 @@ import 'api_exception.dart';
 
 class ApiClient {
   ApiClient(this._sessionStorage)
-      : _dio = Dio(
-          BaseOptions(
-            baseUrl: AppConfig.baseUrl,
-            connectTimeout: const Duration(seconds: 10),
-            receiveTimeout: const Duration(seconds: 20),
-          ),
-        ) {
+    : _dio = Dio(
+        BaseOptions(
+          baseUrl: AppConfig.baseUrl,
+          connectTimeout: const Duration(seconds: 10),
+          receiveTimeout: const Duration(seconds: 20),
+        ),
+      ) {
     _dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) async {

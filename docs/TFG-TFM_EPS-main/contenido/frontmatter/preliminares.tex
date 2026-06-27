@@ -1,0 +1,114 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% PÁGINAS PRELIMINARES
+% Preámbulo, agradecimientos, dedicatoria, resumen y abstract.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% =====================================================================
+%% PREÁMBULO (Justificación y Objetivos) -- obligatorio
+%% =====================================================================
+\chapter*{Preámbulo}
+\addcontentsline{toc}{chapter}{Preámbulo}
+
+La vigilancia de espacios interiores cerrados (oficinas, naves, almacenes o
+viviendas) recae habitualmente en cámaras fijas y en la supervisión humana, dos
+recursos con cobertura limitada y elevado coste de atención continuada. La
+robótica móvil de servicio, unida a los avances recientes en visión por
+computador, abre la posibilidad de automatizar esta tarea mediante un agente
+capaz de recorrer el entorno de forma autónoma y de avisar únicamente cuando
+detecta una situación relevante. El presente Trabajo Fin de Grado se enmarca en
+este contexto y propone el diseño y la implementación de un sistema robótico de
+patrulla autónoma para interiores, construido sobre un robot \mbox{TurtleBot~4} y
+\gls{ros}, que cartografía el espacio, lo recorre siguiendo una ruta de
+cobertura, detecta la presencia de personas mediante una red neuronal de
+detección de objetos y notifica las incidencias a una plataforma centralizada
+con la que el usuario interactúa desde una aplicación móvil. El objetivo general
+es demostrar la viabilidad de una arquitectura desacoplada y orientada a eventos
+que integre la capa robótica, el procesamiento a bordo del robot y los servicios web
+en un único sistema funcional, extensible y seguro.
+
+\cleardoublepage
+
+%% =====================================================================
+%% AGRADECIMIENTOS (opcional)
+%% =====================================================================
+\chapter*{Agradecimientos}
+\addcontentsline{toc}{chapter}{Agradecimientos}
+
+En primer lugar, quiero agradecer a mi tutor, Francisco Antonio Pujol López, su
+orientación y su disponibilidad durante el desarrollo de este trabajo.
+
+A mis padres y a mi pareja María, por confiar siempre en mí, incluso cuando yo no lo
+hacía.
+
+
+A mis amigos Alejandro, Miguel, Nicolás, Juan, Raúl Luján y Raúl Ruiz, por el apoyo
+constante a lo largo de estos años y ser un pilar importantísimo en mi historia
+como ingeniero.
+
+Finalmente, agradecer a la \EPSfacultad{} de la \EPSuniversidad{} la inestimable
+formación recibida durante el grado.
+
+\cleardoublepage
+
+%% =====================================================================
+%% DEDICATORIA (opcional) -- una hoja a la derecha, sin entrada en índice.
+%% Personaliza el texto; es un marcador de posición.
+%% =====================================================================
+\thispagestyle{empty}
+\null\vfill
+\begin{flushright}
+  \itshape
+  A mi familia y pareja,\\
+  por su apoyo incondicional y por mantenerme siempre con los pies en la tierra.
+\end{flushright}
+\vfill
+\cleardoublepage
+
+%% =====================================================================
+%% CITA / FRASE CÉLEBRE (opcional) -- una hoja a la derecha, sin índice.
+%% Sustituye la cita y su autor por los que prefieras.
+%% =====================================================================
+\thispagestyle{empty}
+\null\vfill
+\begin{flushright}
+  \itshape
+  ``Solo podemos ver poco del futuro,\\ 
+  pero lo suficiente para darnos cuenta de que hay mucho por hacer.''
+  \par\bigskip
+  \normalfont\small Alan Turing, 1950
+\end{flushright}
+\vfill
+\cleardoublepage
+
+%% =====================================================================
+%% RESUMEN
+%% =====================================================================
+\chapter*{Resumen}
+\addcontentsline{toc}{chapter}{Resumen}
+
+La vigilancia de espacios interiores cerrados depende en gran medida de cámaras
+fijas y de supervisión humana, soluciones de cobertura limitada y atención
+costosa. Este trabajo aborda la automatización de dicha tarea mediante un robot
+móvil capaz de patrullar de forma autónoma y de alertar solo ante eventos
+relevantes. Para ello se ha diseñado e implementado un sistema completo sobre un
+robot \mbox{TurtleBot~4} y \gls{ros}, organizado como un monorepo con cuatro
+bloques: la capa robótica, una infraestructura de datos en contenedores, un
+servicio de backend y una aplicación de usuario. El robot construye el mapa del
+entorno mediante \gls{slam}, genera una ruta de cobertura a partir de dicho mapa
+y la recorre con la pila de navegación \gls{nav2}, mientras un nodo de percepción
+basado en \gls{yolo} detecta personas y registra las incidencias. La
+comunicación entre el robot y el servidor se resuelve con una arquitectura
+orientada a eventos basada en un bus de mensajería, lo que desacopla el hardware
+del plano de control y evita la dependencia de una conexión permanente entre ambos
+extremos. El backend, desarrollado con
+FastAPI, consume estos eventos, persiste los datos y expone una \gls{api}
+\gls{rest} consumida por una aplicación \mbox{Flutter} desde la que el usuario
+controla la patrulla y revisa los incidentes. Los resultados presentados son de
+carácter preliminar y se centran en la validación funcional de la arquitectura;
+no obstante, el sistema sienta una base sólida y extensible para el desarrollo de
+soluciones de vigilancia robótica autónoma.
+
+\textbf{Palabras clave:} robótica móvil, ROS 2, navegación autónoma, visión por
+computador, arquitectura orientada a eventos, vigilancia.
+
+\cleardoublepage

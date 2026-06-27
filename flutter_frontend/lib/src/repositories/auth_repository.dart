@@ -6,11 +6,7 @@ class AuthSession {
   final int userId;
   final String role;
 
-  AuthSession({
-    required this.token,
-    required this.userId,
-    required this.role,
-  });
+  AuthSession({required this.token, required this.userId, required this.role});
 }
 
 class AuthRepository {
@@ -42,10 +38,7 @@ class AuthRepository {
   }) async {
     final data = await _api.post<Map<String, dynamic>>(
       '/user/login',
-      data: {
-        'email': email,
-        'password': password,
-      },
+      data: {'email': email, 'password': password},
     );
     return AuthSession(
       token: data['access_token'] as String,

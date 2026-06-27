@@ -10,17 +10,19 @@ import 'state/theme_controller.dart';
 
 export 'core/providers.dart';
 
-final authControllerProvider = StateNotifierProvider<AuthController, AuthState>((ref) {
-  return AuthController(
-    ref.read(authRepositoryProvider),
-    ref.read(sessionStorageProvider),
-  );
-});
-
-final themeControllerProvider = StateNotifierProvider<ThemeController, ThemeMode>((ref) {
-  return ThemeController();
-});
-
-final robotsControllerProvider = AsyncNotifierProvider<RobotsController, List<Robot>>(
-  RobotsController.new,
+final authControllerProvider = StateNotifierProvider<AuthController, AuthState>(
+  (ref) {
+    return AuthController(
+      ref.read(authRepositoryProvider),
+      ref.read(sessionStorageProvider),
+    );
+  },
 );
+
+final themeControllerProvider =
+    StateNotifierProvider<ThemeController, ThemeMode>((ref) {
+      return ThemeController();
+    });
+
+final robotsControllerProvider =
+    AsyncNotifierProvider<RobotsController, List<Robot>>(RobotsController.new);

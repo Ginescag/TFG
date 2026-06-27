@@ -8,7 +8,7 @@ import uvicorn
 
 from fastapi import FastAPI, Depends, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.write_api import SYNCHRONOUS
 from confluent_kafka import Consumer, Producer, KafkaError
@@ -869,7 +869,13 @@ async def list_user_incidents(current_user: Usuario = Depends(get_current_user),
     Endpoint to list all incidents associated with a specific user (through their robots).
     """
 
-    total_incidents = db.query(Incidente).join(Robot).filter(Robot.usuario_id == current_user.id).all()    
+    total_incidents = (
+        db.query(Incidente)
+        .join(Robot)
+        .options(joinedload(Incidente.robot))
+        .filter(Robot.usuario_id == current_user.id)
+        .all()
+    )
 
     return total_incidents
 
@@ -899,9 +905,70 @@ async def list_robot_incidents(robot_id: str,current_user: Usuario = Depends(get
             detail="You do not have permission to view incidents for this robot"
         )
     
-    incidentes = db.query(Incidente).filter(Incidente.robot_id == robot_id).all()
+    incidentes = (
+        db.query(Incidente)
+        .options(joinedload(Incidente.robot))
+        .filter(Incidente.robot_id == robot_id)
+        .all()
+    )
 
     return incidentes
+
+@app.get(
+        "/user/incidents/{incident_id}",
+        response_model=IncidenteRespuesta,
+        status_code=status.HTTP_200_OK,
+        tags=["Users"]
+)
+async def get_incident(incident_id: UUID, current_user: Usuario = Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    Endpoint to get the details of a single incident owned by the current user.
+    """
+    incident = (
+        db.query(Incidente)
+        .join(Robot)
+        .options(joinedload(Incidente.robot))
+        .filter(Incidente.id == incident_id, Robot.usuario_id == current_user.id)
+        .first()
+    )
+
+    if not incident:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Incident not found or you do not have permission to view it"
+        )
+
+    return incident
+
+@app.put(
+        "/user/incidents/{incident_id}/review",
+        response_model=IncidenteRespuesta,
+        status_code=status.HTTP_200_OK,
+        tags=["Users"]
+)
+async def review_incident(incident_id: UUID, current_user: Usuario = Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    Endpoint to mark an incident (owned by the current user) as reviewed/checked.
+    """
+    incident = (
+        db.query(Incidente)
+        .join(Robot)
+        .options(joinedload(Incidente.robot))
+        .filter(Incidente.id == incident_id, Robot.usuario_id == current_user.id)
+        .first()
+    )
+
+    if not incident:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Incident not found or you do not have permission to view it"
+        )
+
+    incident.revisado = True
+    db.commit()
+    db.refresh(incident)
+
+    return incident
 
 @app.get(
         "/user/incidents/{incident_id}/show-video",
@@ -1062,8 +1129,129 @@ async def admin_list_robot_incidents(
     """
     Admin endpoint to list all incidents for a specific robot.
     """
-    incidents = db.query(Incidente).filter(Incidente.robot_id == robot_id).all()
+    incidents = (
+        db.query(Incidente)
+        .options(joinedload(Incidente.robot))
+        .filter(Incidente.robot_id == robot_id)
+        .all()
+    )
     return incidents
+
+@app.get(
+        "/admin/incidents/{incident_id}/show-video",
+        response_model=IncidenteURLRespuesta,
+        status_code=status.HTTP_200_OK,
+        tags=["Admin"]
+)
+async def admin_get_incident_video(
+    incident_id: UUID,
+    current_admin: Usuario = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Admin endpoint to get the video URL of any incident (no owner restriction).
+    """
+    incident = db.query(Incidente).filter(Incidente.id == incident_id).first()
+
+    if not incident:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Incident not found"
+        )
+
+    if not incident.bucket_name or not incident.video_filename:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video information for this incident is incomplete"
+        )
+
+    # Generate a presigned URL for the video in MinIO with boto3
+    try:
+        s3_client = boto3.client(
+            's3',
+            endpoint_url=settings.minio_endpoint,
+            aws_access_key_id=settings.minio_access_key,
+            aws_secret_access_key=settings.minio_secret_key
+        )
+
+        video_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={
+                'Bucket': incident.bucket_name,
+                'Key': incident.video_filename
+                },
+            ExpiresIn=3600  # URL expires in 1 hour
+        )
+    except Exception as e:
+        print(f"Error generating presigned URL for incident video: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not generate video URL"
+        )
+
+    return IncidenteURLRespuesta(video_url=video_url)
+
+@app.get(
+        "/admin/incidents/{incident_id}",
+        response_model=IncidenteRespuesta,
+        status_code=status.HTTP_200_OK,
+        tags=["Admin"]
+)
+async def admin_get_incident(
+    incident_id: UUID,
+    current_admin: Usuario = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Admin endpoint to get the details of any incident (no owner restriction).
+    """
+    incident = (
+        db.query(Incidente)
+        .options(joinedload(Incidente.robot))
+        .filter(Incidente.id == incident_id)
+        .first()
+    )
+
+    if not incident:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Incident not found"
+        )
+
+    return incident
+
+@app.put(
+        "/admin/incidents/{incident_id}/review",
+        response_model=IncidenteRespuesta,
+        status_code=status.HTTP_200_OK,
+        tags=["Admin"]
+)
+async def admin_review_incident(
+    incident_id: UUID,
+    current_admin: Usuario = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Admin endpoint to mark any incident as reviewed/checked (no owner restriction).
+    """
+    incident = (
+        db.query(Incidente)
+        .options(joinedload(Incidente.robot))
+        .filter(Incidente.id == incident_id)
+        .first()
+    )
+
+    if not incident:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Incident not found"
+        )
+
+    incident.revisado = True
+    db.commit()
+    db.refresh(incident)
+
+    return incident
 
 @app.get(
         "/admin/users",

@@ -38,7 +38,9 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   Future<void> _handleLogin() async {
     setState(() => _loading = true);
     try {
-      await ref.read(authControllerProvider.notifier).login(
+      await ref
+          .read(authControllerProvider.notifier)
+          .login(
             email: _loginEmail.text.trim(),
             password: _loginPassword.text.trim(),
           );
@@ -54,7 +56,9 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   Future<void> _handleRegister() async {
     setState(() => _loading = true);
     try {
-      await ref.read(authControllerProvider.notifier).registerAndLogin(
+      await ref
+          .read(authControllerProvider.notifier)
+          .registerAndLogin(
             nombre: _registerName.text.trim(),
             email: _registerEmail.text.trim(),
             password: _registerPassword.text.trim(),
@@ -72,20 +76,19 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   }
 
   void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
   Widget build(BuildContext context) {
     final titleStyle = Theme.of(context).textTheme.titleSmall;
-    final headerStyle = Theme.of(context).textTheme.headlineSmall;
 
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
-        title: Text('Start using the app', style: headerStyle),
+        title: Image.asset('assets/warden_logo.png', height: 40),
       ),
       body: Padding(
         padding: const EdgeInsets.all(24),

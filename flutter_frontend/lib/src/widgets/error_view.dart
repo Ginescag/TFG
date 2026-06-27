@@ -15,10 +15,7 @@ class ErrorView extends StatelessWidget {
         description: Text(message, textAlign: TextAlign.center),
         footer: onRetry == null
             ? null
-            : ShadButton(
-                onPressed: onRetry,
-                child: const Text('Reintentar'),
-              ),
+            : ShadButton(onPressed: onRetry, child: const Text('Reintentar')),
       ),
     );
   }

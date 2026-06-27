@@ -7,6 +7,7 @@ import '../../data/api_exception.dart';
 import '../../models/robot.dart';
 import '../../providers.dart';
 import '../../widgets/app_drawer.dart';
+import '../../widgets/connection_dot.dart';
 import '../../widgets/error_view.dart';
 import '../../widgets/loading_view.dart';
 
@@ -54,7 +55,7 @@ class RobotsScreen extends ConsumerWidget {
     await showShadDialog<void>(
       context: context,
       builder: (context) => ShadDialog(
-        title: const Text('Nuevo robot'),
+        title: const Text('New robot'),
         description: const Text('Register the robot with its ID and an alias.'),
         actions: [
           ShadButton.outline(
@@ -81,21 +82,12 @@ class RobotsScreen extends ConsumerWidget {
             children: [
               ShadInput(
                 controller: idController,
-                placeholder: const Text('Robot ID (QR)'),
+                placeholder: const Text('Robot ID'),
               ),
               const SizedBox(height: 12),
               ShadInput(
                 controller: aliasController,
                 placeholder: const Text('Alias'),
-              ),
-              const SizedBox(height: 12),
-              ShadButton.outline(
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('QR Scan pending')),
-                  );
-                },
-                child: const Text('Scan QR'),
               ),
             ],
           ),
@@ -128,7 +120,13 @@ class _RobotsList extends ConsumerWidget {
       itemBuilder: (context, index) {
         final robot = robots[index];
         return ShadCard(
-          title: Text(robot.alias),
+          title: Row(
+            children: [
+              ConnectionDot(online: robot.estadoConexion == 'online'),
+              const SizedBox(width: 8),
+              Expanded(child: Text(robot.alias)),
+            ],
+          ),
           description: Text('ID: ${robot.id}'),
           footer: Row(
             children: [
@@ -155,7 +153,9 @@ class _RobotsList extends ConsumerWidget {
                     );
                     if (!ok && context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('No se pudo abrir Grafana')),
+                        const SnackBar(
+                          content: Text('No se pudo abrir Grafana'),
+                        ),
                       );
                     }
                   } catch (e) {
@@ -185,7 +185,10 @@ class _RobotsList extends ConsumerWidget {
 }
 
 Future<void> _showEditAliasDialog(
-    BuildContext context, WidgetRef ref, Robot robot) async {
+  BuildContext context,
+  WidgetRef ref,
+  Robot robot,
+) async {
   final aliasController = TextEditingController(text: robot.alias);
   await showShadDialog<void>(
     context: context,
@@ -221,7 +224,10 @@ Future<void> _showEditAliasDialog(
 }
 
 Future<void> _showReinstallDialog(
-    BuildContext context, WidgetRef ref, Robot robot) async {
+  BuildContext context,
+  WidgetRef ref,
+  Robot robot,
+) async {
   await showShadDialog<void>(
     context: context,
     builder: (context) => ShadDialog.alert(

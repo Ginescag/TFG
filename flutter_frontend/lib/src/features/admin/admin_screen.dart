@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../../data/api_exception.dart';
@@ -33,7 +34,6 @@ class _AdminScreenState extends ConsumerState<AdminScreen> {
   String _activeTab = 'users';
 
   @override
-  @override
   void dispose() {
     _robotIdController.dispose();
     super.dispose();
@@ -49,26 +49,35 @@ class _AdminScreenState extends ConsumerState<AdminScreen> {
     } on ApiException catch (e) {
       _showMessage(e.message);
     } catch (_) {
-      _showMessage('No se pudieron cargar incidencias.');
+      _showMessage('Could not load incidents.');
     } finally {
       setState(() => _loadingIncidents = false);
     }
   }
 
   void _showMessage(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
   Widget build(BuildContext context) {
-    final titleStyle = Theme.of(context).textTheme.titleSmall;
+    final baseTitle = Theme.of(context).textTheme.titleSmall;
+    final titleStyle = baseTitle?.copyWith(
+      fontSize: (baseTitle.fontSize ?? 14) - 1,
+    );
 
     return Scaffold(
       drawer: const AppDrawer(),
-      appBar: AppBar(title: const Text('Admin')),
-      body: Padding(
+      appBar: AppBar(
+        centerTitle: true,
+        title: Text(
+          'Admin',
+          style: Theme.of(context).textTheme.headlineSmall,
+        ),
+      ),
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: ShadTabs<String>(
           value: _activeTab,
@@ -78,23 +87,29 @@ class _AdminScreenState extends ConsumerState<AdminScreen> {
           tabs: [
             ShadTab(
               value: 'users',
+              mainAxisAlignment: MainAxisAlignment.center,
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
               content: _UsersTab(),
-              child: Text('Usuarios', style: titleStyle),
+              child: Text('Users', style: titleStyle),
             ),
             ShadTab(
               value: 'robots',
+              mainAxisAlignment: MainAxisAlignment.center,
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
               content: _RobotsTab(),
               child: Text('Robots', style: titleStyle),
             ),
             ShadTab(
               value: 'incidents',
+              mainAxisAlignment: MainAxisAlignment.center,
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
               content: _IncidentsTab(
                 controller: _robotIdController,
                 incidents: _robotIncidents,
                 loading: _loadingIncidents,
                 onLoad: _loadIncidents,
               ),
-              child: Text('Incidencias', style: titleStyle),
+              child: Text('Incidents', style: titleStyle),
             ),
           ],
         ),
@@ -111,6 +126,8 @@ class _UsersTab extends ConsumerWidget {
     return usersAsync.when(
       data: (users) => ListView.separated(
         padding: const EdgeInsets.all(16),
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
         itemCount: users.length,
         separatorBuilder: (_, __) => const SizedBox(height: 12),
         itemBuilder: (context, index) {
@@ -118,30 +135,36 @@ class _UsersTab extends ConsumerWidget {
           return ShadCard(
             title: Text(user.nombre),
             description: Text(user.email),
-            footer: Row(
+            footer: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 ShadButton.outline(
+                  width: double.infinity,
                   onPressed: () async {
                     await ref.read(adminRepositoryProvider).grantAdmin(user.id);
                     ref.refresh(adminUsersProvider);
                   },
                   child: const Text('Grant admin'),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(height: 8),
                 ShadButton.outline(
+                  width: double.infinity,
                   onPressed: () async {
-                    await ref.read(adminRepositoryProvider).revokeAdmin(user.id);
+                    await ref
+                        .read(adminRepositoryProvider)
+                        .revokeAdmin(user.id);
                     ref.refresh(adminUsersProvider);
                   },
                   child: const Text('Revoke admin'),
                 ),
-                const Spacer(),
+                const SizedBox(height: 8),
                 ShadButton.destructive(
+                  width: double.infinity,
                   onPressed: () async {
                     await ref.read(adminRepositoryProvider).deleteUser(user.id);
                     ref.refresh(adminUsersProvider);
                   },
-                  child: const Text('Eliminar'),
+                  child: const Text('Delete'),
                 ),
               ],
             ),
@@ -150,46 +173,98 @@ class _UsersTab extends ConsumerWidget {
       ),
       loading: () => const LoadingView(),
       error: (error, _) => ErrorView(
-        message: error is ApiException ? error.message : 'Error al cargar usuarios.',
+        message: error is ApiException
+            ? error.message
+            : 'Error al cargar usuarios.',
         onRetry: () => ref.refresh(adminUsersProvider),
       ),
     );
   }
 }
 
-class _RobotsTab extends ConsumerWidget {
+class _RobotsTab extends ConsumerStatefulWidget {
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_RobotsTab> createState() => _RobotsTabState();
+}
+
+class _RobotsTabState extends ConsumerState<_RobotsTab> {
+  final _searchController = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final robotsAsync = ref.watch(adminRobotsProvider);
 
     return robotsAsync.when(
-      data: (robots) => ListView.separated(
-        padding: const EdgeInsets.all(16),
-        itemCount: robots.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 12),
-        itemBuilder: (context, index) {
-          final robot = robots[index];
-          return ShadCard(
-            title: Text(robot.alias),
-            description: Text('ID: ${robot.id}'),
-            footer: Align(
-              alignment: Alignment.centerRight,
-              child: ShadButton.destructive(
-                onPressed: () async {
-                  await ref
-                      .read(adminRepositoryProvider)
-                      .deleteRobot(robot.id);
-                  ref.refresh(adminRobotsProvider);
-                },
-                child: const Text('Eliminar'),
+      data: (robots) {
+        final q = _query.trim().toLowerCase();
+        final filtered = q.isEmpty
+            ? robots
+            : robots
+                  .where(
+                    (r) =>
+                        r.alias.toLowerCase().contains(q) ||
+                        r.id.toLowerCase().contains(q),
+                  )
+                  .toList();
+
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ShadInput(
+                controller: _searchController,
+                placeholder: const Text('Search robot...'),
+                onChanged: (value) => setState(() => _query = value),
               ),
-            ),
-          );
-        },
-      ),
+              const SizedBox(height: 12),
+              if (filtered.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 24),
+                  child: Center(child: Text('No robots found')),
+                )
+              else
+                ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: filtered.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 12),
+                  itemBuilder: (context, index) {
+                    final robot = filtered[index];
+                    return ShadCard(
+                      title: Text(robot.alias),
+                      description: Text('ID: ${robot.id}'),
+                      footer: Align(
+                        alignment: Alignment.centerRight,
+                        child: ShadButton.destructive(
+                          onPressed: () async {
+                            await ref
+                                .read(adminRepositoryProvider)
+                                .deleteRobot(robot.id);
+                            ref.refresh(adminRobotsProvider);
+                          },
+                          child: const Text('Delete'),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+            ],
+          ),
+        );
+      },
       loading: () => const LoadingView(),
       error: (error, _) => ErrorView(
-        message: error is ApiException ? error.message : 'Error al cargar robots.',
+        message: error is ApiException
+            ? error.message
+            : 'Error al cargar robots.',
         onRetry: () => ref.refresh(adminRobotsProvider),
       ),
     );
@@ -214,6 +289,7 @@ class _IncidentsTab extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           ShadInput(
             controller: controller,
@@ -223,24 +299,44 @@ class _IncidentsTab extends StatelessWidget {
           const SizedBox(height: 12),
           ShadButton(
             onPressed: loading ? null : onLoad,
-            child: Text(loading ? 'Cargando...' : 'Buscar incidencias'),
+            child: Text(loading ? 'Loading...' : 'Search incidents'),
           ),
           const SizedBox(height: 12),
-          Expanded(
-            child: incidents.isEmpty
-                ? const Center(child: Text('Sin incidencias'))
-                : ListView.separated(
-                    itemCount: incidents.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 12),
-                    itemBuilder: (context, index) {
-                      final incident = incidents[index];
-                      return ShadCard(
-                        title: Text('Incidencia ${incident.id.substring(0, 8)}'),
-                        description: Text('Robot: ${incident.robotId}'),
-                      );
-                    },
+          if (incidents.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Center(child: Text('No incidents')),
+            )
+          else
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: incidents.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              itemBuilder: (context, index) {
+                final incident = incidents[index];
+                final alias = incident.robotAlias;
+                final robotLabel = (alias == null || alias.isEmpty)
+                    ? incident.robotId
+                    : '$alias (${incident.robotId})';
+                return ShadCard(
+                  title: Text(
+                    'Incidencia ${incident.id.substring(0, 8)}',
                   ),
-          ),
+                  description: Text('Robot: $robotLabel'),
+                  footer: Align(
+                    alignment: Alignment.centerRight,
+                    child: ShadButton.outline(
+                      onPressed: () => context.go(
+                        '/admin/incidents/${incident.id}',
+                        extra: incident,
+                      ),
+                      child: const Text('View details'),
+                    ),
+                  ),
+                );
+              },
+            ),
         ],
       ),
     );

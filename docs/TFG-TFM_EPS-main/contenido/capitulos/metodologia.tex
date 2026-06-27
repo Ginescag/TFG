@@ -1,0 +1,290 @@
+\chapter{Metodología}
+\label{cap:metodologia}
+
+Este capítulo describe el enfoque metodológico seguido para alcanzar los
+objetivos planteados, las herramientas y entornos empleados, y los criterios de
+evaluación previstos para valorar el sistema. La descripción detallada del
+diseño y la implementación se reserva para el Capítulo~\ref{cap:desarrollo}.
+
+%% =============================================================================
+\section{Metodología de desarrollo}
+\label{sec:metodologia-desarrollo}
+
+El trabajo se ha abordado mediante un enfoque de desarrollo \textbf{iterativo e
+incremental}, organizado en sprints sucesivos cuya gestión se ha apoyado en un
+tablero \textit{Kanban}. En este tablero, las tareas avanzan por columnas según
+su estado, lo que ha permitido mantener una visión clara del progreso y priorizar
+el trabajo pendiente en cada iteración. En lugar de construir la solución completa
+de una sola vez, se ha avanzado por incrementos funcionales, validando cada parte
+antes de integrarla con el resto.
+
+El orden de construcción ha seguido la cadena de dependencias del sistema. En
+primer lugar se levantó la infraestructura de datos (las bases de datos, el bus de
+mensajería y los servicios de almacenamiento y visualización), por ser el soporte
+sobre el que se apoya todo lo demás. A continuación se desarrolló el backend, que
+centraliza la lógica de negocio y la \gls{api}. Después se abordó la capa robótica
+(\texttt{robot\_ws}), que produce los datos y consume los servicios del backend. Y,
+por último, se implementó la aplicación de usuario, que también consume la
+\gls{api} del backend.
+
+La integración entre el robot y el backend se realizó funcionalidad a
+funcionalidad, siguiendo siempre el mismo patrón: primero se implementaba en el
+backend el \textit{endpoint} o la lógica necesaria para una capacidad concreta, y
+a continuación se desarrollaba la parte del robot que se conecta a ella. Este
+encadenamiento, repetido para cada funcionalidad (telemetría, incidencias,
+comandos de control y autenticación), garantizaba que cada extremo dispusiera ya
+de su contraparte y que cada incremento fuera verificable de principio a fin.
+
+Finalmente, todo el código se ha organizado como un \textbf{monorepo}, es decir,
+un único repositorio que agrupa todos los componentes del sistema, lo que facilita
+la coherencia entre las distintas partes y simplifica el despliegue conjunto. El
+repositorio se estructura en cuatro bloques principales: la capa robótica
+(\texttt{robot\_ws}), el backend (\texttt{backend}), la aplicación de usuario
+(\texttt{flutter\_frontend}) y un conjunto de \textit{scripts} de automatización
+del despliegue. La arquitectura concreta de cada bloque se detalla en el
+Capítulo~\ref{cap:desarrollo}.
+
+%% =============================================================================
+\section{Herramientas, frameworks y entornos}
+\label{sec:herramientas}
+
+El sistema se apoya en un conjunto de tecnologías de código abierto, seleccionadas
+por su madurez y por su integración con el ecosistema de \gls{ros}. La
+Tabla~\ref{tab:tecnologias} resume las principales herramientas empleadas en cada
+capa del sistema.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Principales tecnologías empleadas por capa del sistema. Fuente:
+  elaboración propia.}
+  \label{tab:tecnologias}
+  \begin{tabular}{@{}lp{8.5cm}@{}}
+    \toprule
+    \textbf{Capa} & \textbf{Tecnologías} \\
+    \midrule
+    Plataforma robótica & TurtleBot~4, \gls{ros} Humble \\
+    Navegación y mapeado & \gls{nav2}, slam\_toolbox, explore\_lite \\
+    Percepción & \gls{yolo}v8n (Ultralytics), OpenCV \\
+    Mensajería & Apache Kafka (cliente confluent-kafka) \\
+    Backend & FastAPI, SQLAlchemy, Uvicorn \\
+    Persistencia & PostgreSQL, InfluxDB, MinIO \\
+    Visualización & Grafana \\
+    Aplicación de usuario & Flutter \\
+    Infraestructura & Docker, Docker Compose \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+A continuación se detalla el papel de cada tecnología y la justificación de su
+elección, agrupadas por capa.
+
+\subsection{Plataforma robótica y navegación}
+
+El robot empleado es el TurtleBot~4, una plataforma de robótica móvil de
+referencia compuesta por una base \textit{Create~3}, un computador de a bordo
+(Raspberry~Pi~4), un sensor \gls{lidar} y una cámara OAK-D. Se ha elegido por ser
+una plataforma estándar, asequible y con soporte oficial para \gls{ros}, lo que
+evita desviar el esfuerzo del trabajo hacia la integración de hardware a bajo
+nivel. Sobre ella se ejecuta \gls{ros} en su distribución \textit{Humble}, una
+versión de soporte prolongado que es la recomendada para el TurtleBot~4
+\parencite{macenski2022ros2}.
+
+La navegación se construye sobre tres paquetes consolidados del ecosistema. La
+pila \gls{nav2} se ocupa de la planificación y el control del movimiento
+\parencite{macenski2020nav2}; \texttt{slam\_toolbox} construye el mapa del entorno
+mediante \gls{slam} láser \parencite{macenski2021slamtoolbox}; y
+\texttt{explore\_lite} dirige la exploración autónoma inicial que recorre el
+espacio desconocido hasta completar el mapa. Reutilizar estas soluciones, en lugar
+de reimplementar la navegación, permite concentrar el trabajo en la orquestación y
+la integración del sistema.
+
+\subsection{Percepción visual}
+
+La detección de personas se realiza con \gls{yolo} en su versión \textit{nano}
+(YOLOv8n), a través de la biblioteca de Ultralytics
+\parencite{jocher2023ultralytics}. Se ha optado por la variante \textit{nano} por
+ser la más ligera de la familia, lo que permite ejecutar la inferencia en la
+\gls{cpu} del propio robot a una velocidad suficiente para la patrulla, sin
+necesidad de una \gls{gpu} dedicada. La biblioteca aporta, además, modelos
+preentrenados y una interfaz sencilla que reduce el coste de integración. El
+tratamiento de las imágenes, esto es, la captura de los fotogramas de la cámara y
+la codificación del clip de vídeo de cada incidencia, se apoya en OpenCV,
+biblioteca estándar de facto en visión por computador.
+
+\subsection{Mensajería orientada a eventos}
+
+El bus de eventos que comunica el robot con el servidor es Apache Kafka
+\parencite{kreps2011kafka}. Se ha preferido a una solución de mensajería más
+ligera porque conserva los mensajes en un registro durable, lo que desacopla por
+completo al productor del consumidor y permite que el backend procese la
+telemetría y las incidencias a su propio ritmo, e incluso reprocese eventos
+pasados. La comunicación se organiza en tres \textit{topics}
+(\texttt{robot\_telemetry}, \texttt{robot\_incidents} y \texttt{robot\_commands}).
+Tanto el robot como el backend acceden a Kafka mediante \texttt{confluent-kafka},
+un cliente de alto rendimiento basado en la biblioteca \textit{librdkafka},
+escrita en C.
+
+\subsection{Backend y servicios web}
+
+El backend se ha desarrollado con FastAPI, un framework web asíncrono para Python.
+Su elección responde a tres motivos: el alto rendimiento que aporta su modelo de
+servidor asíncrono (\textit{ASGI}), la validación automática de los datos de
+entrada y salida mediante Pydantic, y la generación automática de la documentación
+de la \gls{api} según el estándar OpenAPI. La aplicación se sirve con Uvicorn, un
+servidor \textit{ASGI}, y la configuración (credenciales y direcciones de los
+servicios) se gestiona con \texttt{pydantic-settings} a partir de variables de
+entorno, lo que facilita el despliegue en distintos equipos.
+
+El acceso a la base de datos relacional se realiza mediante el \gls{orm}
+SQLAlchemy, que abstrae las consultas \gls{sql} y mapea las tablas a clases de
+Python, mientras que Alembic versiona y aplica los cambios del esquema. El
+almacenamiento de los vídeos se gestiona con \texttt{boto3}, el \gls{sdk} de
+\gls{s3}, que permite operar sobre MinIO con la misma interfaz que el servicio de
+Amazon. Por último, la seguridad se apoya en \texttt{pyjwt} para los tokens
+\gls{jwt} y en \texttt{passlib} con \textit{bcrypt} para el cifrado de las
+contraseñas de los usuarios.
+
+\subsection{Persistencia, almacenamiento y visualización}
+
+La distinta naturaleza de los datos del sistema ha llevado a emplear un almacén
+específico para cada tipo. Los datos estructurados y con relaciones (usuarios,
+robots e incidencias) residen en PostgreSQL, una base de datos relacional madura
+que garantiza la integridad mediante transacciones. La telemetría del robot
+(batería, posición y estado), de carácter temporal y alta frecuencia, se almacena
+en InfluxDB, una base de datos de series temporales (\gls{tsdb}) optimizada para
+este tipo de datos y para las consultas por intervalos de tiempo. El vídeo de las
+incidencias, al ser un objeto binario de gran tamaño, se guarda en MinIO, un
+almacén de objetos compatible con la \gls{api} de \gls{s3}; esta separación evita
+sobrecargar la base de datos relacional con ficheros pesados. Finalmente, Grafana
+proporciona la visualización de la telemetría mediante paneles que consultan
+InfluxDB, con un panel por robot que la aplicación de usuario incrusta
+directamente.
+
+\subsection{Aplicación de usuario}
+
+La aplicación con la que interactúa el usuario se ha construido con Flutter, el
+framework de Google basado en el lenguaje Dart. Su principal ventaja es permitir
+desarrollar, a partir de una única base de código, una aplicación para móvil, web
+y escritorio, algo idóneo para un trabajo con tiempo limitado. Sobre Flutter se
+apoyan varios paquetes especializados: la gestión del estado se resuelve con
+\texttt{flutter\_riverpod}; la navegación entre pantallas, con \texttt{go\_router};
+las llamadas a la \gls{api} \gls{rest} del backend, con el cliente HTTP
+\texttt{dio}; la persistencia local de la sesión, con \texttt{shared\_preferences};
+los componentes de la interfaz, con \texttt{shadcn\_ui}; y la apertura del panel de
+Grafana en el navegador, con \texttt{url\_launcher}.
+
+\subsection{Infraestructura y despliegue}
+
+Toda la infraestructura de datos (PostgreSQL, Kafka, InfluxDB, MinIO y Grafana) se
+ejecuta en contenedores gestionados con Docker y orquestados mediante Docker
+Compose. Esta decisión persigue la reproducibilidad del entorno: un único fichero
+declarativo describe todos los servicios, sus versiones y su configuración, de modo
+que el sistema completo puede levantarse en cualquier equipo con un solo comando,
+sin instalaciones manuales y con un comportamiento idéntico. El aislamiento entre
+contenedores evita, además, los conflictos de dependencias entre los distintos
+servicios.
+
+\subsection{Entorno de desarrollo y herramientas de apoyo}
+
+El grueso del sistema se ha desarrollado en \textbf{Python}, lenguaje común al
+backend y a los nodos del robot, lo que ha permitido compartir conocimientos y
+bibliotecas entre ambas partes. Es, además, el lenguaje de referencia para la
+programación de nodos en \gls{ros} y para el ecosistema de visión por computador y
+aprendizaje automático empleado en la percepción. Para aislar las dependencias de
+cada componente se han utilizado entornos virtuales (\textit{virtual environments},
+\texttt{venv}), de modo que el backend y la capa robótica mantienen conjuntos de
+paquetes independientes y sin interferencias entre versiones; las dependencias de
+cada entorno se declaran de forma explícita (por ejemplo, en el fichero
+\texttt{requirements.txt} del backend), lo que refuerza la reproducibilidad ya
+mencionada.
+
+Durante la elaboración del trabajo se ha empleado, asimismo, el asistente de
+inteligencia artificial Claude como herramienta de apoyo en tareas de revisión,
+búsqueda de información (\textit{research}) y documentación. Su uso se ha limitado
+en todo momento a un papel auxiliar: las decisiones de diseño del
+sistema han sido tomadas y validadas por el autor, sin que la herramienta las
+sustituya.
+
+\subsection{Bibliotecas y dependencias principales}
+
+A modo de síntesis, la Tabla~\ref{tab:librerias} recoge las bibliotecas más
+relevantes empleadas en el desarrollo, indicando su función y el componente del
+sistema en el que se utilizan. La mayoría se han presentado ya en las subsecciones
+anteriores; la tabla las reúne como referencia.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Bibliotecas y dependencias principales, su función y el componente en
+  el que se emplean. Fuente: elaboración propia.}
+  \label{tab:librerias}
+  \begin{tabular}{@{}lp{9cm}@{}}
+    \toprule
+    \textbf{Biblioteca} & \textbf{Función} \\
+    \midrule
+    \multicolumn{2}{@{}l}{\textit{Backend (Python)}} \\
+    FastAPI & Framework web asíncrono y exposición de la \gls{api} \gls{rest} \\
+    Uvicorn & Servidor \textit{ASGI} que ejecuta la aplicación \\
+    SQLAlchemy & \gls{orm} de acceso a PostgreSQL \\
+    Alembic & Migraciones del esquema de la base de datos \\
+    \texttt{influxdb-client} & Escritura de la telemetría en InfluxDB \\
+    \texttt{confluent-kafka} & Consumo de los eventos del bus Kafka \\
+    \texttt{boto3} & Acceso a MinIO (\gls{s3}) para el vídeo de incidencias \\
+    Pydantic & Validación de datos y configuración por entorno \\
+    PyJWT & Emisión y verificación de tokens \gls{jwt} \\
+    \texttt{passlib} / \textit{bcrypt} & Cifrado de las contraseñas de usuario \\
+    \texttt{httpx} & Cliente HTTP asíncrono \\
+    \midrule
+    \multicolumn{2}{@{}l}{\textit{Capa robótica (\texttt{robot\_ws}, Python sobre \gls{ros})}} \\
+    Ultralytics (\gls{yolo}) & Detección de personas durante la patrulla \\
+    OpenCV & Captura de fotogramas y codificación del clip de vídeo \\
+    NumPy & Cálculo numérico de soporte a la percepción \\
+    \texttt{confluent-kafka} & Publicación de telemetría e incidencias en Kafka \\
+    \texttt{boto3} & Subida de los clips de vídeo a MinIO \\
+    \texttt{httpx} & Solicitud del token al backend (\gls{tofu} y \gls{jwt}) \\
+    \midrule
+    \multicolumn{2}{@{}l}{\textit{Aplicación de usuario (Flutter, Dart)}} \\
+    Dio & Cliente HTTP para consumir la \gls{api} \gls{rest} \\
+    Riverpod & Gestión del estado de la aplicación \\
+    \texttt{go\_router} & Navegación entre pantallas \\
+    \texttt{shared\_preferences} & Persistencia local de la sesión \\
+    \texttt{shadcn\_ui} & Componentes de la interfaz de usuario \\
+    \texttt{url\_launcher} & Apertura del panel de Grafana en el navegador \\
+    \texttt{intl} & Formato de fechas y localización \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\FloatBarrier
+
+%% =============================================================================
+\section{Criterios y métricas de evaluación}
+\label{sec:metricas}
+
+Dado que el sistema integra subsistemas de naturaleza distinta, su evaluación
+contempla varias dimensiones complementarias:
+
+\begin{itemize}
+  \item \textbf{Navegación y patrulla.} Capacidad del robot para construir el
+    mapa, generar una ruta de cobertura válida y recorrerla de forma cíclica sin
+    colisiones, así como la tasa de éxito en alcanzar las poses objetivo.
+
+  \item \textbf{Detección de incidencias.} Acierto del detector en la
+    identificación de personas, considerando la confianza de las detecciones y
+    la presencia de falsos positivos y falsos negativos.
+
+  \item \textbf{Rendimiento del sistema de extremo a extremo.} Latencia desde
+    que se produce un evento en el robot hasta que la incidencia queda
+    registrada y es visible para el usuario, así como la regularidad del envío de
+    telemetría.
+
+  \item \textbf{Validación funcional de la integración.} Comprobación de que los
+    flujos completos (arranque, mapeado, patrulla, detección, notificación y
+    control desde la aplicación) se ejecutan de principio a fin.
+\end{itemize}
+
+Conviene señalar que, en el estado actual del trabajo, la evaluación realizada es
+fundamentalmente de carácter \textbf{funcional}. La obtención de métricas
+cuantitativas sistemáticas, especialmente sobre hardware real, queda pendiente y
+se discute en el Capítulo~\ref{cap:resultados} y entre las líneas de trabajo
+futuro del Capítulo~\ref{cap:conclusiones}.

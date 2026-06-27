@@ -14,6 +14,18 @@ final incidentsProvider = FutureProvider<List<Incident>>((ref) {
   return ref.read(incidentsRepositoryProvider).listIncidents();
 });
 
+/// Localiza un incidente por id dentro de la lista ya cargada
+/// (`incidentsProvider`), sin una llamada de red adicional. Devuelve `null`
+/// si la lista aún no está disponible o el incidente no existe.
+final incidentByIdProvider = Provider.family<Incident?, String>((ref, id) {
+  final list = ref.watch(incidentsProvider).valueOrNull;
+  if (list == null) return null;
+  for (final incident in list) {
+    if (incident.id == id) return incident;
+  }
+  return null;
+});
+
 class IncidentsScreen extends ConsumerWidget {
   const IncidentsScreen({super.key});
 
@@ -54,28 +66,37 @@ class _IncidentsList extends StatelessWidget {
   Widget build(BuildContext context) {
     if (incidents.isEmpty) {
       return const Center(
-        child: Text(
-          'No incidents registered.',
-          textAlign: TextAlign.center,
-        ),
+        child: Text('No incidents registered.', textAlign: TextAlign.center),
       );
     }
+
+    final accent = ShadTheme.of(context).colorScheme.primary;
+    final muted = ShadTheme.of(context).colorScheme.mutedForeground;
 
     return ListView.separated(
       padding: const EdgeInsets.all(16),
       itemCount: incidents.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 16),
+      separatorBuilder: (_, _) => const SizedBox(height: 16),
       itemBuilder: (context, index) {
         final incident = incidents[index];
         return ShadCard(
-          title: Text('Incident ${incident.id.substring(0, 8)}'),
-          description: Text('Robot: ${incident.robotId}'),
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Incident ${incident.id.substring(0, 8)}'),
+              Text(
+                incident.revisado ? 'CHECKED' : 'PENDING',
+                style: TextStyle(
+                  color: incident.revisado ? accent : muted,
+                ),
+              ),
+            ],
+          ),
+          description: Text('Robot: ${_robotLabel(incident)}'),
           footer: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              ShadBadge.outline(
-                child: Text(_formatDate(incident.createdAt)),
-              ),
+              ShadBadge.outline(child: Text(_formatDate(incident.createdAt))),
               ShadButton.outline(
                 onPressed: () => context.go('/incidents/${incident.id}'),
                 child: const Text('View details'),
@@ -85,6 +106,12 @@ class _IncidentsList extends StatelessWidget {
         );
       },
     );
+  }
+
+  String _robotLabel(Incident incident) {
+    final alias = incident.robotAlias;
+    if (alias == null || alias.isEmpty) return incident.robotId;
+    return '$alias (${incident.robotId})';
   }
 
   String _formatDate(String? raw) {

@@ -8,6 +8,7 @@ import 'features/incidents/incident_detail_screen.dart';
 import 'features/incidents/incidents_screen.dart';
 import 'features/profile/profile_screen.dart';
 import 'features/robots/robots_screen.dart';
+import 'models/incident.dart';
 import 'providers.dart';
 import 'state/auth_state.dart';
 
@@ -31,21 +32,15 @@ final routerProvider = Provider<GoRouter>((ref) {
         return '/home';
       }
 
-      if (state.matchedLocation == '/admin' && auth.role != 'admin') {
+      if (state.matchedLocation.startsWith('/admin') && auth.role != 'admin') {
         return '/home';
       }
 
       return null;
     },
     routes: [
-      GoRoute(
-        path: '/auth',
-        builder: (context, state) => const AuthScreen(),
-      ),
-      GoRoute(
-        path: '/home',
-        builder: (context, state) => const HomeScreen(),
-      ),
+      GoRoute(path: '/auth', builder: (context, state) => const AuthScreen()),
+      GoRoute(path: '/home', builder: (context, state) => const HomeScreen()),
       GoRoute(
         path: '/robots',
         builder: (context, state) => const RobotsScreen(),
@@ -56,17 +51,21 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/incidents/:id',
-        builder: (context, state) => IncidentDetailScreen(
-          incidentId: state.pathParameters['id'] ?? '',
-        ),
+        builder: (context, state) =>
+            IncidentDetailScreen(incidentId: state.pathParameters['id'] ?? ''),
       ),
       GoRoute(
         path: '/profile',
         builder: (context, state) => const ProfileScreen(),
       ),
+      GoRoute(path: '/admin', builder: (context, state) => const AdminScreen()),
       GoRoute(
-        path: '/admin',
-        builder: (context, state) => const AdminScreen(),
+        path: '/admin/incidents/:id',
+        builder: (context, state) => IncidentDetailScreen(
+          incidentId: state.pathParameters['id'] ?? '',
+          incident: state.extra is Incident ? state.extra as Incident : null,
+          admin: true,
+        ),
       ),
     ],
   );
