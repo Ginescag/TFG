@@ -87,6 +87,12 @@
 %% =======================================================================
 \mainmatter
 
+% Ajuste vertical: \raggedbottom evita que LaTeX estire el espacio entre parrafos
+% y figuras para rellenar la pagina (lo que dejaba huecos grandes y separaba el
+% texto de las capturas). Las paginas terminan al ras y la prosa queda pegada a
+% sus figuras.
+\raggedbottom
+
 % Capítulos del trabajo (ajusta segun tu estructura)
 \input{contenido/capitulos/introduccion}
 \input{contenido/capitulos/marco-teorico}
@@ -109,17 +115,5 @@
   type=\acronymtype,
   title={Lista de Acrónimos y Abreviaturas}
 ]
-
-% Glosario de términos
-\printglossary[
-  style=listgroup,
-  type=main,
-  title={Glosario de Términos}
-]
-\glsaddallunused
-
-% Anexos (ajusta según tus necesidades)
-\appendix
-\input{contenido/anexos/anexo-despliegue}
 
 \end{document}

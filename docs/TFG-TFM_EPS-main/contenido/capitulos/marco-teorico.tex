@@ -18,14 +18,19 @@ robóticas que proporciona un modelo de comunicación entre procesos, herramient
 de construcción y un ecosistema amplio de paquetes reutilizables. Su primera
 generación se introdujo con el objetivo de favorecer la reutilización de
 software en investigación robótica \parencite{quigley2009ros}. Sin embargo, su
-diseño, articulado en torno a un nodo maestro que coordinaba el descubrimiento
-entre procesos, presentaba limitaciones para los entornos de producción, los
-sistemas con varios robots y las aplicaciones con requisitos de tiempo real. La
-segunda generación, \gls{ros}, rediseña la arquitectura para superar esas
-carencias: elimina el maestro centralizado y delega el descubrimiento y el
-transporte de mensajes en el estándar \gls{dds}, lo que aporta una comunicación
-descentralizada, control de la calidad de servicio de los enlaces y mejor
-soporte para despliegues distribuidos \parencite{macenski2022ros2}.
+diseño dependía de un nodo maestro central que coordinaba el descubrimiento
+entre procesos: todos los nodos debían registrarse en él para poder localizarse
+entre sí, por lo que constituía un punto único de fallo. Si el maestro dejaba de
+funcionar, los nodos no podían descubrir a sus interlocutores y el sistema en su
+conjunto quedaba inoperativo. Esta dependencia, junto con la ausencia de
+garantías de tiempo real, limitaba su uso en entornos de producción y en
+sistemas con varios robots. La segunda generación, \gls{ros}, rediseña la
+arquitectura para superar esas carencias: suprime el nodo maestro y delega el
+descubrimiento y el transporte de mensajes en el estándar \gls{dds}, de modo que
+los nodos se descubren directamente entre sí, sin coordinador central. Así
+desaparece el punto único de fallo y se obtiene una comunicación descentralizada,
+con control de la calidad de servicio de los enlaces y mejor soporte para
+despliegues distribuidos \parencite{macenski2022ros2}.
 
 El modelo de programación de \gls{ros} se organiza en torno a \textit{nodos},
 procesos independientes que encapsulan una funcionalidad concreta y se comunican
@@ -44,9 +49,9 @@ ejecución y un sistema de lanzamiento que describe cómo arrancar y orquestar
 conjuntos de nodos. Esta separación en componentes débilmente acoplados favorece
 la modularidad, permite reutilizar paquetes mantenidos por la comunidad y hace
 posible sustituir una pieza sin alterar el resto del sistema. 
-El diseño de este trabajo sigue ese principio de forma explícita, donde cada 
-capacidad del robot (telemetría, percepción, navegación, distribución de secretos y
-patrulla) reside en un nodo especializado y encapsulado.
+El sistema desarrollado adopta ese principio de forma explícita; el detalle de cómo
+se reparten las capacidades del robot en nodos especializados se aborda en el
+Capítulo~\ref{cap:desarrollo}.
 
 %% =============================================================================
 \section{Localización y mapeado simultáneos (SLAM)}
@@ -63,16 +68,17 @@ mapa requiere conocer la posición y una buena posición requiere conocer el map
 y porque los errores de odometría se acumulan a lo largo del recorrido y
 producen deriva si no se corrigen.
 
-Una solución de \gls{slam} suele descomponerse en dos partes. El componente
-frontal procesa las medidas de los sensores y resuelve la asociación de datos,
-esto es, reconocer qué observaciones corresponden a un mismo elemento del
-entorno; el componente posterior estima la trayectoria y el mapa más coherentes
-con esas observaciones. La detección de cierres de bucle, que identifica lugares
-ya visitados, es determinante para corregir la deriva acumulada. Históricamente,
-las primeras formulaciones se apoyaban en filtros recursivos, como el filtro de
-Kalman extendido, mientras que los enfoques predominantes en la actualidad
-plantean el problema como la optimización de un grafo de poses, más preciso y
-escalable para trayectorias largas.
+Resolver el \gls{slam} implica abordar a la vez dos tareas acopladas. La primera
+consiste en interpretar las medidas de los sensores y resolver la asociación de
+datos, esto es, decidir qué observaciones corresponden a un mismo elemento real
+del entorno. La segunda estima, a partir de esas asociaciones, la trayectoria del
+robot y el mapa más coherentes con todas las observaciones acumuladas. En este
+proceso, la detección de cierres de bucle (reconocer que el robot ha vuelto a un
+lugar ya visitado) resulta determinante para corregir la deriva acumulada por la
+odometría. Históricamente, las primeras formulaciones se apoyaban en filtros
+recursivos, como el filtro de Kalman extendido; los enfoques predominantes en la
+actualidad plantean el problema como la optimización de un grafo de poses, más
+preciso y escalable para trayectorias largas.
 
 Según el sensor empleado, se distingue entre el \gls{slam} visual, basado en
 cámaras, y el \gls{slam} láser, basado en un sensor \gls{lidar} que mide
@@ -98,8 +104,13 @@ calcula una ruta hasta el objetivo sobre una representación del entorno conocid
 como mapa de costes (\textit{costmap}), que combina los obstáculos del mapa con
 una zona de inflado de seguridad alrededor de ellos; el controlador local genera
 las órdenes de velocidad que siguen esa ruta mientras esquiva obstáculos
-imprevistos; y los comportamientos de recuperación intervienen cuando el robot
-queda bloqueado.
+imprevistos; y los comportamientos de recuperación son maniobras predefinidas que
+se activan cuando la navegación falla o el robot queda bloqueado. Entre ellas
+figuran limpiar los mapas de costes para descartar obstáculos transitorios o
+espurios, girar sobre sí mismo para volver a percibir el entorno, retroceder o
+esperar un instante. El árbol de comportamiento las ejecuta de forma ordenada
+cuando un intento de navegación no progresa y, tras ellas, reintenta alcanzar el
+objetivo, de modo que el robot se desatasca sin intervención humana.
 
 El empleo de árboles de comportamiento, en lugar de una máquina de estados fija,
 dota a la navegación de una lógica de decisión modular y fácil de modificar, en
@@ -117,9 +128,9 @@ descomposiciones celulares, que dividen el espacio en regiones simples recorrida
 en barridos de ida y vuelta (\textit{boustrophedon}), hasta los métodos basados en
 rejilla o en árboles de expansión, y la elección entre ellas responde al
 compromiso entre completitud de la cobertura, longitud de la ruta y coste de
-cálculo. En este trabajo se adopta una aproximación sencilla basada en una rejilla
-de puntos sobre el espacio libre del mapa, recorrida en zig-zag, que resulta
-suficiente para cubrir estancias cerradas de tamaño moderado.
+cálculo. De entre estas estrategias, este trabajo opta por una basada en rejilla por su
+sencillez; su diseño concreto y su justificación se detallan en el
+Capítulo~\ref{cap:desarrollo}.
 
 %% =============================================================================
 \section{Visión por computador y detección de objetos}
@@ -128,7 +139,7 @@ suficiente para cubrir estancias cerradas de tamaño moderado.
 La detección de objetos consiste en localizar y clasificar las instancias de
 interés presentes en una imagen, devolviendo para cada una un recuadro
 delimitador (\textit{bounding box}) y una categoría con su grado de confianza. Los
-métodos modernos se apoyan en redes neuronales convolucionales (\gls{cnn}),
+métodos modernos se apoyan en redes neuronales convolucionales (\acrshort{cnn}),
 capaces de aprender directamente de los datos las características visuales
 relevantes. Tradicionalmente se distinguen dos familias: los detectores de dos
 etapas, como \gls{cnnobj}, que primero proponen regiones candidatas y después las
@@ -148,10 +159,11 @@ reducido el tamaño de los modelos.
 
 Para su despliegue en plataformas con recursos limitados resulta habitual emplear
 las variantes más ligeras, que ofrecen un compromiso favorable entre precisión y
-coste computacional, frente a las variantes mayores que requieren una \gls{gpu}
-potente. En este trabajo se utiliza la versión \textit{nano} de \gls{yolo} en su
+coste computacional, frente a las variantes mayores que requieren una \acrshort{gpu}
+potente. En este trabajo se recurre a una de estas variantes ligeras, en la
 implementación de Ultralytics \parencite{jocher2023ultralytics}, ejecutada en el
-propio robot para detectar la presencia de personas durante la patrulla. Este
+propio dispositivo; el modelo concreto y la justificación de la elección se detallan
+en el Capítulo~\ref{cap:desarrollo}. Este
 procesamiento en el propio robot (\textit{edge computing}) evita transmitir vídeo de
 forma continua a un servidor, reduce la carga de red y favorece la privacidad, al
 analizar las imágenes en el propio dispositivo.
@@ -178,16 +190,12 @@ durante un periodo configurable. Esta persistencia permite que distintos
 consumidores lean el mismo flujo a su propio ritmo, e incluso reprocesen eventos
 pasados, una propiedad difícil de obtener con una comunicación síncrona y efímera.
 
-Este enfoque resulta especialmente adecuado para un robot de patrulla. Al publicar
-la telemetría y las incidencias como eventos, el robot solo transmite información
-cuando se produce algo relevante y no necesita mantener conexiones síncronas con
-el servidor ni esperar su respuesta, lo que reduce el consumo y mejora la
-tolerancia a desconexiones temporales. El servidor, por su parte, consume estos
-eventos a su propio ritmo y los distribuye al resto de la plataforma. Frente a un
-modelo basado únicamente en peticiones \gls{rest}, en el que el cliente debe
-preguntar de forma repetida por las novedades, el bus de eventos invierte el flujo
-y reparte mejor la carga. Este desacoplamiento es uno de los pilares del diseño
-propuesto.
+Este enfoque encaja bien con un robot de patrulla: al publicar la telemetría y las
+incidencias como eventos, el robot solo transmite cuando ocurre algo relevante y no
+necesita mantener conexiones síncronas con el servidor, lo que reduce el consumo y
+mejora la tolerancia a desconexiones temporales. El modo en que el sistema
+desarrollado articula este patrón, y su contraste con un modelo basado únicamente en
+peticiones \gls{rest}, se desarrolla en el Capítulo~\ref{cap:desarrollo}.
 
 %% =============================================================================
 \section{Trabajos relacionados}

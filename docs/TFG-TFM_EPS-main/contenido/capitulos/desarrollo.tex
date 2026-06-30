@@ -85,11 +85,12 @@ transición de su máquina de estados.
 
 Cada comando responde a una intención del usuario distinta (el detalle de las
 transiciones se aborda en la sección~\ref{sec:patrol-nav}). \textbf{Iniciar} pone
-en marcha la patrulla: si el robot no dispone todavía de un mapa, dispara la
+en marcha la patrulla (el robot se desacopla de su base antes de moverse): si el robot
+no dispone todavía de un mapa, dispara la
 exploración y el mapeo del entorno antes de empezar a patrullar; si ya existe un
 mapa guardado, lo reutiliza y pasa directamente a planificar la ruta y a recorrerla.
-\textbf{Detener} cancela la navegación en curso, devuelve el robot al \textit{dock}
-y deja la patrulla en pausa. \textbf{Reinstalar} borra el mapa guardado y devuelve
+\textbf{Detener} cancela la navegación en curso, devuelve el robot al \textit{dock},
+donde se acopla, y deja la patrulla en pausa. \textbf{Reinstalar} borra el mapa guardado y devuelve
 el robot a su estado inicial, de modo que el siguiente inicio vuelve a explorar el
 entorno desde cero.
 
@@ -124,7 +125,7 @@ backend, un consumidor en hilo independiente verifica el token, comprueba que el
 \texttt{robot\_id} del mensaje coincide con el del token y escribe un punto de la
 medida \texttt{robot\_telemetry} en InfluxDB. Grafana consume esa serie temporal y
 la aplicación la muestra empotrada en modo \textit{kiosk}, obteniendo la
-\gls{url} filtrada por robot mediante \texttt{GET /user/\{id\}/dashboard-url}.
+\acrshort{url} filtrada por robot mediante \texttt{GET /user/\{id\}/dashboard-url}.
 
 \paragraph*{Incidencias.} El nodo \texttt{detect\_incident} detecta personas
 mediante visión por computador, graba un vídeo del suceso, lo sube a MinIO y
@@ -132,7 +133,7 @@ publica en el topic \texttt{robot\_incidents} (de nuevo con el \gls{jwt} en
 cabecera) los datos del objeto almacenado. El consumidor de incidencias del
 backend valida el token, crea un registro \texttt{Incidente} en PostgreSQL y lo
 deja disponible para la aplicación, que lista las incidencias
-(\texttt{GET /user/incidents}) y reproduce el vídeo a través de una \gls{url}
+(\texttt{GET /user/incidents}) y reproduce el vídeo a través de una \acrshort{url}
 prefirmada (\texttt{GET /user/incidents/\{id\}/show-video}).
 
 \paragraph*{Estado operativo.} El orquestador \texttt{patrol\_nav} envía un
@@ -194,18 +195,18 @@ La tabla~\ref{tab:flujos} resume los flujos descritos.
 \label{sec:infraestructura}
 
 La infraestructura se despliega mediante contenedores. El fichero
-\texttt{backend/docker-compose.yml} define ocho servicios: la base de datos
+\texttt{docker-compose.yml} del backend define ocho servicios: la base de datos
 relacional (\texttt{postgres}), el bus de eventos (\texttt{zookeeper} y
 \texttt{kafka}) con su trabajo de inicialización (\texttt{init-kafka}), la base de
 series temporales (\texttt{influxdb}), el almacén de objetos (\texttt{minio}) con
 su inicializador (\texttt{init-minio}) y la visualización (\texttt{grafana}). Por
-su parte, \texttt{robot\_ws/docker-compose.yml} define un único servicio de
+su parte, el \texttt{docker-compose.yml} de \texttt{robot\_ws} define un único servicio de
 desarrollo \gls{ros} (\texttt{ros2\_dev}), conectado a la red externa
 \texttt{backend\_default}.
 
 Conviene matizar que este \texttt{docker-compose} no constituye el despliegue de
 producción del robot, sino un entorno de desarrollo y simulación: proporciona, con
-acceso a WSLg y \gls{gpu}, las herramientas gráficas (RViz y Gazebo principalmente) necesarias
+acceso a WSLg y \acrshort{gpu}, las herramientas gráficas (RViz y Gazebo principalmente) necesarias
 para ejecutar pruebas y lanzar simulaciones sin depender del hardware. En una
 instalación real, los nodos descritos en la sección~\ref{sec:capa-robotica} se
 ejecutan directamente sobre la plataforma física del TurtleBot~4.
@@ -240,10 +241,11 @@ publicados en el anfitrión. La tabla~\ref{tab:puertos} recoge esos puertos.
 \end{table}
 
 La topología de red de Kafka merece una nota. El \textit{broker} expone dos
-\textit{listeners}: \texttt{PLAINTEXT://kafka:29092}, usado por los clientes que
-viven dentro de la red de contenedores, y \texttt{PLAINTEXT\_HOST://localhost:9094},
-usado por el backend y los nodos del robot cuando corren en el anfitrión. El
-extracto~\ref{lst:kafka} muestra esa configuración. Los trabajos de
+\textit{listeners}: uno interno, en el puerto~29092, para los clientes que viven
+dentro de la red de contenedores, y otro externo, en el puerto~9094, para el
+backend y los nodos del robot cuando corren en el anfitrión. El
+extracto~\ref{lst:kafka} muestra esa configuración, en la que
+\texttt{<IP-DEL-HOST>} representa la dirección real del anfitrión. Los trabajos de
 inicialización crean, respectivamente, los tres topics
 (\texttt{robot\_incidents}, \texttt{robot\_telemetry}, \texttt{robot\_commands}) y
 el \textit{bucket} \texttt{tfg-incidentes} de MinIO. Por coherencia, los nodos del
@@ -256,7 +258,7 @@ anfitrión y \texttt{.env.container} con las direcciones internas
 kafka:
   image: confluentinc/cp-kafka:7.5.0
   environment:
-    KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9094
+    KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://<IP-DEL-HOST>:9094
     KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
     KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
   ports:
@@ -305,13 +307,18 @@ y otro parcial sobre las no revisadas (\texttt{idx\_incidentes\_no\_revisados}, 
 condición \texttt{revisado = false}), que se mantiene compacto al cubrir únicamente
 las incidencias pendientes de atención.
 
-La persistencia se apoya en una fábrica de sesiones (\texttt{SessionLocal}, con
-\texttt{autocommit} y \texttt{autoflush} desactivados) y en la dependencia
-\texttt{get\_db}, que abre una sesión por petición y la cierra al terminar
-(un \textit{generator} con \texttt{yield}). De este modo, cada solicitud \gls{http}
-opera sobre su propia transacción, confirmada de forma explícita con \texttt{commit};
-los consumidores de eventos, que viven fuera del ciclo de petición, gestionan su
-sesión de forma manual con \texttt{SessionLocal()}.
+La persistencia se organiza en torno a \texttt{SessionLocal}, una \textit{fábrica de
+sesiones} de \textit{SQLAlchemy} creada con \texttt{sessionmaker}: cada llamada a
+\texttt{SessionLocal()} produce una sesión nueva, es decir, una conversación aislada
+con la base de datos. Se configura con \texttt{autocommit} y \texttt{autoflush}
+desactivados, lo que otorga control explícito sobre la transacción: ningún cambio se
+envía ni se confirma de forma implícita, sino solo cuando el código lo ordena con
+\texttt{commit}, de modo que una petición que falle a mitad no deja datos a medio
+escribir. Para que cada petición \gls{http} disponga de su propia sesión y esta se cierre
+siempre al terminar, el acceso se encapsula en la dependencia \texttt{get\_db}, que
+\textit{FastAPI} inyecta en cada endpoint que la declara. Los consumidores de eventos,
+que viven fuera del ciclo de petición, gestionan su sesión por su cuenta con
+\texttt{SessionLocal()}.
 
 % ---------------------------------------------------------------------------
 \subsection{API REST}
@@ -396,20 +403,23 @@ si el \textit{broker} no está disponible, responde \texttt{503 Service Unavaila
 \texttt{stop-patrol} aplica la misma plantilla pero solo admite la transición desde
 \texttt{patrolling}, y \texttt{reinstall} no impone restricción de estado.
 
-Aquí se materializa la asimetría descrita en la sección~\ref{sec:flujo-control}:
-\texttt{start-patrol} no escribe el estado en la base de datos (la línea que lo haría
-está deliberadamente comentada), de modo que sea el \textit{heartbeat} quien refleje
-la progresión \texttt{exploring}~$\rightarrow$~\dots~$\rightarrow$~\texttt{patrolling};
-en cambio, \texttt{stop-patrol} y \texttt{reinstall} fijan de forma optimista
-\texttt{stopped} e \texttt{idle}, respectivamente, porque son estados terminales que
-no dependen de un proceso ulterior del robot.
+Aquí se materializa la asimetría descrita en la sección~\ref{sec:flujo-control}. En
+\texttt{start-patrol}, la línea que escribiría el estado en la base de datos se ha
+dejado deliberadamente comentada en el código: tras
+publicar el comando en Kafka, el endpoint devuelve el robot sin tocar su
+\texttt{estado\_operativo}, de manera que sea el \textit{heartbeat} quien refleje la
+progresión real \texttt{exploring}~$\rightarrow$~\dots~$\rightarrow$~\texttt{patrolling}
+y la primera vuelta no se salte la fase de mapeo. En cambio, \texttt{stop-patrol} y
+\texttt{reinstall} sí fijan de forma optimista \texttt{stopped} e \texttt{idle},
+respectivamente, porque son estados terminales que no dependen de un proceso ulterior
+del robot.
 
 Dos endpoints de lectura completan el flujo del usuario. \texttt{GET
 /user/\{id\}/dashboard-url} construye, tras validar la propiedad del robot, la
-\gls{url} del panel de Grafana en modo \textit{kiosk} filtrada por el robot
+\acrshort{url} del panel de Grafana en modo \textit{kiosk} filtrada por el robot
 (\texttt{var-robot\_id}), con ventana temporal de las últimas seis horas y refresco
 cada diez segundos. \texttt{GET /user/incidents/\{id\}/show-video} genera con
-\textit{boto3} una \gls{url} prefirmada del objeto de MinIO con validez de una hora
+\textit{boto3} una \acrshort{url} prefirmada del objeto de MinIO con validez de una hora
 (\texttt{ExpiresIn=3600}), de manera que la aplicación reproduce el vídeo sin exponer
 las credenciales del almacén ni hacer público el \textit{bucket}.
 
@@ -426,15 +436,43 @@ perder ningún suceso aunque el servidor haya estado caído, mientras que el de
 telemetría arranca desde el más reciente (\texttt{latest}), porque una medida atrasada
 carece de valor y solo interesa el estado actual del robot.
 
-Al iniciarse el servidor, \texttt{startup\_event} lanza los bucles de consumo en hilos
-\textit{daemon} independientes, de modo que el procesamiento de eventos no bloquea el
-atendido de peticiones \gls{http}; el productor se guarda en \texttt{app.state} para
-que lo compartan los endpoints de control. Ambos bucles sondean el \textit{broker}
-con \texttt{poll(1.0)} y aplican a cada mensaje la misma cadena de validación
-(sección~\ref{sec:seguridad}) antes de procesarlo: extraen la cabecera
-\texttt{Authorization}, verifican el \gls{jwt} y comprueban que el \texttt{robot\_id}
-del cuerpo coincide con el sujeto del token, descartando el mensaje en cualquier otro
-caso.
+Al iniciarse el servidor, cada bucle de consumo arranca en un hilo \textit{daemon}
+independiente (extracto~\ref{lst:consumers}), de modo que la espera de mensajes no
+bloquea al hilo principal que atiende las peticiones \gls{http} y los consumidores se
+detienen solos al apagar el servidor. El productor de comandos se guarda en
+\texttt{app.state} para que lo compartan los endpoints de control.
+
+Cada mensaje recibido pasa por la misma cadena de validación antes de procesarse
+(sección~\ref{sec:seguridad}): se verifica el \gls{jwt} de la cabecera y se comprueba
+que el \texttt{robot\_id} del cuerpo coincide con el sujeto del token, descartando el
+mensaje en cualquier otro caso.
+
+\SuspendTagging{code}%
+\begin{pythoncode}[title={Consumidores en hilos daemon y sondeo del broker (server.py)}, label={lst:consumers}]
+# Distinta politica de offset inicial por consumidor.
+incident_consumer = Consumer({
+    'bootstrap.servers': settings.kafka_broker_url,
+    'group.id': 'incident-consumer',
+    'auto.offset.reset': 'earliest'})   # No perder sucesos pasados.
+telemetry_consumer = Consumer({
+    'bootstrap.servers': settings.kafka_broker_url,
+    'group.id': 'telemetry-consumer',
+    'auto.offset.reset': 'latest'})     # Solo interesa el estado actual.
+
+# Cada bucle corre en un hilo daemon: no bloquea el apagado ni las peticiones HTTP.
+threading.Thread(target=detect_incident,
+                 args=(incident_consumer,), daemon=True).start()
+threading.Thread(target=serve_telemetry,
+                 args=(telemetry_consumer,), daemon=True).start()
+
+# Dentro de cada bucle: espera <= 1 s por mensaje, sin espera activa.
+while True:
+    msg = consumer.poll(1.0)
+    if msg is None:
+        continue                        # No habia mensajes en este intervalo.
+    # ... validacion del JWT y del robot_id antes de procesar ...
+\end{pythoncode}%
+\ResumeTagging{code}
 
 El tratamiento posterior difiere según el flujo. El consumidor de telemetría compone
 un punto de la medida \texttt{robot\_telemetry}, etiquetado por \texttt{robot\_id} y
@@ -451,7 +489,11 @@ productor para no perder los comandos pendientes de entrega.
 \label{sec:seguridad}
 
 La seguridad se apoya en varios mecanismos complementarios concentrados en
-\texttt{security.py} y \texttt{dependencies.py}. Las contraseñas de usuario y los
+\texttt{security.py} y \texttt{dependencies.py}. El esquema parte de una premisa: el
+robot opera sin supervisión y no puede depender de que una persona introduzca
+credenciales, de modo que acuerda un secreto con el backend en su primer contacto
+(\gls{tofu}) y, a partir de él, porta su identidad en cada petición y evento mediante
+un \gls{jwt}. Las contraseñas de usuario y los
 secretos de robot nunca se almacenan en claro: se cifran de forma irreversible con
 \textit{bcrypt} a través de \textit{passlib} (un \texttt{CryptContext} con el esquema
 \texttt{bcrypt}), que incorpora \textit{salt} y un factor de coste configurable. El
@@ -480,7 +522,7 @@ Para los mensajes que llegan por Kafka, que no atraviesan las dependencias de
 valida el \gls{jwt} incluido en la cabecera del mensaje y comprueba que el
 \texttt{robot\_id} del cuerpo coincide con el sujeto del token, evitando la
 suplantación de un robot por otro. El acceso a los vídeos se realiza mediante
-\gls{url} prefirmadas de MinIO generadas con \textit{boto3} y caducidad de una hora,
+\acrshort{url} prefirmadas de MinIO generadas con \textit{boto3} y caducidad de una hora,
 de modo que el \textit{bucket} permanece privado. Conviene señalar de forma explícita
 una limitación conocida: la política de \gls{cors} permanece abierta en el estado
 actual del desarrollo y debe restringirse antes de un despliegue en producción. El
@@ -510,13 +552,15 @@ def verificar_token(token: str) -> str:
 \label{sec:capa-robotica}
 
 La capa robótica es un espacio de trabajo de \gls{ros} Humble que combina
-paquetes propios y de terceros. Los paquetes propios son \texttt{patrol\_nav}
-(orquestación), \texttt{detect\_incident} (detección), \texttt{serve\_telemetry}
-(telemetría), \texttt{secret\_helper} (gestión de secretos) y
-\texttt{secret\_helper\_interfaces} (que define el servicio \texttt{GetToken}). Los
+paquetes propios y de terceros. Los paquetes propios son cuatro nodos,
+\texttt{patrol\_nav}, \texttt{detect\_incident}, \texttt{serve\_telemetry} y
+\texttt{secret\_helper}, más el paquete de interfaces
+\texttt{secret\_helper\_interfaces}, que define el servicio \texttt{GetToken}. Los
 de terceros son \texttt{explore\_lite}~\parencite{alvarez2022mexplore} para la
 exploración, \texttt{slam\_toolbox}~\parencite{macenski2021slamtoolbox} para el mapeo,
-\gls{nav2}~\parencite{macenski2020nav2} para la navegación, y \textit{Ultralytics}
+\gls{nav2}~\parencite{macenski2020nav2} para la navegación,
+\texttt{irobot\_create\_msgs} para las acciones de acople y desacople de la base, y
+\textit{Ultralytics}
 \gls{yolo}~\parencite{jocher2023ultralytics,redmon2016yolo} para la visión por
 computador. La mensajería con el backend usa Kafka~\parencite{kreps2011kafka}. La
 tabla~\ref{tab:nodos} resume los nodos propios.
@@ -533,7 +577,7 @@ tabla~\ref{tab:nodos} resume los nodos propios.
     \textbf{Interfaces} \\
     \midrule
     patrol\_nav      & Orquestación de la patrulla (FSM) &
-    \texttt{robot\_commands}, \texttt{/odom}, Nav2 \\
+    \texttt{robot\_commands}, \texttt{/odom}, \texttt{/dock\_status}, Nav2, \texttt{dock}/\texttt{undock} \\
     detect\_incident & Detección de personas y grabación &
     \texttt{/oakd/rgb/\dots}, \texttt{robot\_incidents} \\
     serve\_telemetry & Recolección y envío de telemetría &
@@ -550,12 +594,33 @@ tabla~\ref{tab:nodos} resume los nodos propios.
 
 El nodo \texttt{patrol\_nav} implementa una máquina de estados finitos
 (tabla~\ref{tab:estados-fsm}, con las transiciones de la figura~\ref{fig:fsm}) que
-arranca en \texttt{IDLE} a la espera del primer
-comando de inicio. Antes de operar, espera a que \gls{nav2} esté activo invocando
-\texttt{waitUntilNav2Active} con localizador \texttt{bt\_navigator}: en modo SLAM
-no existe \texttt{amcl}, por lo que el verdadero requisito para enviar objetivos es
-que \texttt{bt\_navigator} esté disponible. El nodo se organiza en torno a cuatro
-temporizadores: uno evalúa la máquina de estados a 1\,Hz (\texttt{state\_machine}),
+arranca en \texttt{IDLE} a la espera del primer comando de inicio. Antes de enviar
+ningún objetivo de navegación, el nodo debe asegurarse de que \gls{nav2} ha terminado
+de arrancar, para lo que emplea la utilidad \texttt{waitUntilNav2Active}. La forma de
+esperar depende de si el robot ya dispone de un mapa guardado, lo que da lugar a dos
+configuraciones. En la primera vuelta, sin mapa, el robot navega con \gls{slam}, que
+construye el mapa y estima la posición sobre la marcha; en esa configuración no existe
+el nodo de localización \texttt{amcl}, y esperarlo bloquearía el arranque de forma
+indefinida, así que el nodo indica a \texttt{waitUntilNav2Active} que se fije
+únicamente en el motor de navegación \texttt{bt\_navigator}, que es el componente que
+realmente ejecuta los objetivos. Cuando ya existe un mapa guardado, el robot opera en
+modo de localización: \gls{nav2} arranca con un servidor de mapa y \texttt{amcl}, el
+nodo fija la pose inicial en el \textit{dock} con \texttt{setInitialPose} y espera la
+disponibilidad completa de la pila (\texttt{amcl} y \texttt{bt\_navigator}) con el
+comportamiento por defecto de \texttt{waitUntilNav2Active}.
+
+El lanzador \texttt{patrol\_bringup\allowbreak.launch\allowbreak.py} elige el modo de
+forma automática a partir de la existencia del fichero del mapa, sin que haya que
+fijarlo a mano: si el mapa existe, arranca \gls{nav2} en modo de localización (servidor
+de mapa y \texttt{amcl}); si no, en modo \gls{slam} (exploración y mapeo), levantando
+además en este caso el servicio de guardado del mapa. El argumento \texttt{sim} del
+lanzador selecciona el entorno de ejecución: con valor verdadero arranca el simulador
+Ignition del TurtleBot~4 y, con valor falso, la pila de navegación sobre el robot real.
+Así, tras una reinstalación que borra el mapa, el siguiente lanzamiento vuelve a empezar
+en \gls{slam} sin intervención manual.
+
+Superada esta comprobación, el nodo se organiza en
+torno a cuatro temporizadores: uno evalúa la máquina de estados a 1\,Hz (\texttt{state\_machine}),
 otro sondea el topic de comandos cada 0,5\,s, un tercero emite el \textit{heartbeat}
 cada 10\,s (traduciendo el estado interno con el diccionario
 \texttt{FSM\_TO\_OPERATIVO}) y el último refresca el token cada 10\,s. El sondeo de
@@ -583,10 +648,17 @@ se realicen de forma asíncrona para no detener el resto de temporizadores.
     SAVING\_MAP    & saving\_map & Guardado del mapa generado \\
     PLANNING       & planning    & Cálculo de la ruta de patrulla \\
     PATROLLING     & patrolling  & Recorrido cíclico de los waypoints \\
-    PATROL\_STOPPED & stopped    & Patrulla detenida, robot en el dock \\
+    PATROL\_STOPPED & stopped    & Patrulla detenida, robot acoplado en su base \\
+    UNDOCKING      & planning    & Desacople de la base antes de conducir \\
+    DOCKING        & stopped     & Acople final en la base al detener la patrulla \\
     \bottomrule
   \end{tabular}
 \end{table}
+
+Conviene notar que estos dos estados de transición no amplían el vocabulario de estado
+operativo que conoce el servidor: \texttt{UNDOCKING} se comunica como \texttt{planning}
+y \texttt{DOCKING} como \texttt{stopped}, de modo que el acople y el desacople quedan
+integrados en los estados de planificación y parada ya existentes.
 
 \begin{figure}[htbp]
   \centering
@@ -604,23 +676,38 @@ se realicen de forma asíncrona para no detener el resto de temporizadores.
     \node[estado, below=of idle] (plan) {PLANNING};
     \node[estado, below=of plan] (patrol) {PATROLLING};
     \node[estado, below=of save] (stop) {PATROL\_STOPPED};
+    \node[estado, below=of patrol] (undock) {UNDOCKING};
+    \node[estado, below=of stop] (dock) {DOCKING};
 
     \draw[trans] (idle) -- node[etq, above]{start (sin mapa)} (expl);
     \draw[trans] (expl) -- node[etq, right]{fin de exploración} (save);
     \draw[trans] (save) -- node[etq, above]{mapa guardado} (plan);
     \draw[trans] (idle) -- node[etq, left]{start (con mapa)} (plan);
     \draw[trans] (plan) -- node[etq, left]{ruta generada} (patrol);
-    \draw[trans] (patrol) to[bend left=15] node[etq, above]{stop} (stop);
-    \draw[trans] (stop) to[bend left=15] node[etq, below]{reanudar} (patrol);
+    \draw[trans] (patrol) -- node[etq, above]{stop} (stop);
+    \draw[trans] (stop) to[bend left=15] node[etq, right]{regreso al dock} (dock);
+    \draw[trans] (dock) to[bend left=15] node[etq, left]{acoplado} (stop);
+    \draw[trans] (stop) .. controls +(235:14mm) and +(10:18mm) .. node[etq, above, pos=0.72]{reanudar} (undock);
+    \draw[trans] (undock) -- node[etq, left]{desacoplado} (patrol);
   \end{tikzpicture}
   \caption[Máquina de estados de patrol\_nav]{Transiciones de la máquina de
-    estados del orquestador \texttt{patrol\_nav}. El comando \texttt{reinstall}
-    devuelve la \gls{fsm} a \texttt{IDLE} desde cualquier estado. Fuente:
-    elaboración propia.}
+    estados del orquestador \texttt{patrol\_nav}. Al reanudar, el robot solo pasa
+    por \texttt{UNDOCKING} si está acoplado; ese desacople previo se aplica a
+    cualquier arranque que implique conducir (también desde \texttt{IDLE}) y, si
+    no hay ruta cargada, \texttt{UNDOCKING} puede dar paso a \texttt{PLANNING} o
+    \texttt{EXPLORING} en lugar de \texttt{PATROLLING}. El comando
+    \texttt{reinstall} devuelve la \gls{fsm} a \texttt{IDLE} desde cualquier
+    estado. Fuente: elaboración propia.}
   \label{fig:fsm}
 \end{figure}
 
-El ciclo completo abarca varias fases. En \textbf{exploración}, el nodo lanza
+El ciclo completo abarca varias fases. Antes de cualquier estado que implique
+conducir, el nodo comprueba si el robot está acoplado (indicador \texttt{is\_docked},
+que mantiene la suscripción a \texttt{/dock\_status}) y, en ese caso, antepone un
+\textbf{desacople} (estado \texttt{UNDOCKING}): como Nav2 no puede mover el robot
+mientras está en la base, el método \texttt{\_begin} recuerda el destino, lanza la
+acción \texttt{undock} de la base \textit{iRobot Create} y, al completarse, continúa
+hacia él. En \textbf{exploración}, el nodo lanza
 \texttt{explore\_lite} como subproceso (mediante \texttt{ros2 launch}) junto con
 \texttt{slam\_toolbox}, y da la fase por terminada cuando se cumplen a la vez dos
 condiciones: que se haya superado un tiempo mínimo de exploración
@@ -645,9 +732,19 @@ reencolando las poses para repetir el recorrido de forma indefinida. La
 \textbf{parada} cancela la navegación en curso y regresa al \textit{dock}; dado que
 Nav2 procesa las cancelaciones de forma asíncrona, el nodo espera a que la tarea
 activa concluya (consultando \texttt{isTaskComplete}) antes de emitir el objetivo de
-retorno, evitando que dos órdenes compitan dentro de Nav2. Por último, la
+retorno, evitando que dos órdenes compitan dentro de Nav2. 
+
+Una vez alcanzada la base, el robot ejecuta el
+\textbf{acople} con la acción \texttt{dock} del \textit{iRobot Create} (estado
+\texttt{DOCKING}) y, al completarse, queda detenido y acoplado; un indicador interno
+(\texttt{stopped\_settled}) señala que la secuencia de parada ha terminado, para no
+repetirla en cada ciclo del temporizador. Por último, la
 \textbf{reinstalación} cancela lo que esté en curso, borra los ficheros del mapa
-(\texttt{.pgm} y \texttt{.yaml}) y devuelve la \gls{fsm} a \texttt{IDLE}.
+(\texttt{.pgm} y \texttt{.yaml}) y devuelve la \gls{fsm} a \texttt{IDLE}. El remapeo no
+puede hacerse en la sesión ya en marcha, pues \texttt{explore\_lite} requiere \gls{slam}
+y, en modo de localización, el servidor de mapa sirve un mapa fijo; por ello, tras la
+reinstalación hay que relanzar el sistema, que, al no encontrar mapa guardado, arrancará
+de nuevo en \gls{slam}.
 
 Dos decisiones de diseño de esta fase merecen justificación. En primer lugar, los
 umbrales que determinan el fin de la exploración (\texttt{explore\_min\_secs} y
@@ -672,23 +769,36 @@ del comando de inicio, que reutiliza el mapa si ya existe.
 def state_machine(self):
     if self.state == 'IDLE':
         return  # Espera al primer start_patrol del usuario.
-    elif self.state == 'EXPLORING':   self.run_exploration()
-    elif self.state == 'SAVING_MAP':  self.save_map()
-    elif self.state == 'PLANNING':    self.generate_waypoints_from_map()
-    elif self.state == 'PATROLLING':  self.run_patrol_cycle()
+    elif self.state == 'EXPLORING':      self.run_exploration()
+    elif self.state == 'SAVING_MAP':     self.save_map()
+    elif self.state == 'PLANNING':       self.generate_waypoints_from_map()
+    elif self.state == 'PATROLLING':     self.run_patrol_cycle()
     elif self.state == 'PATROL_STOPPED': self.run_patrol_stopped()
+    elif self.state == 'UNDOCKING':      self.run_undocking()
+    elif self.state == 'DOCKING':        self.run_docking()
 
 def handle_start_patrol(self):
     if self.state == 'IDLE':
-        if self._map_exists():
-            self.state = 'PLANNING'    # Reutiliza el mapa guardado.
-        else:
-            self.state = 'EXPLORING'   # Ciclo completo desde cero.
+        # Reutiliza el mapa si existe; si no, ciclo completo desde cero.
+        self._begin('PLANNING' if self._map_exists() else 'EXPLORING')
     elif self.state == 'PATROL_STOPPED':
         self.active_task = None
-        self.state = 'PATROLLING'      # Reanuda la patrulla.
+        if self.waypoints_queue:        # Reanuda donde estaba.
+            self._begin('PATROLLING')
+        elif self._map_exists():        # Replanifica desde el mapa.
+            self._begin('PLANNING')
+        else:                           # No hay nada: explora.
+            self._begin('EXPLORING')
 \end{pythoncode}%
 \ResumeTagging{code}
+
+El desacople previo lo gobierna \texttt{\_begin}: como \gls{nav2} no mueve el robot
+mientras está acoplado, si lo está el nodo pasa primero por \texttt{UNDOCKING} y
+retoma después el estado objetivo. Tanto el acople como el desacople se gobiernan con
+un patrón asíncrono: al correr sobre un \textit{executor} de un solo hilo, cada acción
+se sondea por pasos en sucesivos ciclos del temporizador, sin bloquear el resto de
+tareas. La ruta de patrulla, por su parte, se genera recorriendo el espacio libre del
+mapa en un barrido en zig-zag (extracto~\ref{lst:waypoints}).
 
 \SuspendTagging{code}%
 \begin{pythoncode}[title={Generación de waypoints en zig-zag (patrol\_nav.py)}, label={lst:waypoints}]
@@ -710,43 +820,29 @@ for y in range(0, safe_binary.shape[0], grid_spacing_pixels):
 \subsection{Detección: detect\_incident}
 \label{sec:detect-incident}
 
-El nodo \texttt{detect\_incident} se suscribe a la imagen de la cámara
-(\texttt{/oakd/rgb/preview/image\_raw}) y, en su \textit{callback}, aplica el modelo
-YOLOv8n a cada fotograma, considerando incidencia la presencia de una persona (clase
-\texttt{person}) con confianza superior al umbral configurable. Para grabar el suceso
-completo, incluido lo ocurrido justo antes del disparo, mantiene un búfer circular
-(\texttt{deque}) de los últimos cien fotogramas. Cuando se detecta una persona, fija
-un contador de cincuenta fotogramas posteriores que decrementa en cada
-\textit{callback}; al agotarse, congela una copia del búfer, activa un periodo de
-enfriamiento de 30\,s (mediante un temporizador que después vacía el búfer) y delega
-el trabajo pesado en un hilo de entrada/salida separado, de modo que la captura de
-imágenes no se interrumpe. Ese hilo (\texttt{process\_incident\_io}) codifica el clip
-en \texttt{mp4} con OpenCV, lo sube a MinIO con \textit{boto3}, elimina el fichero
-temporal y publica en el topic de incidencias un mensaje con el \texttt{robot\_id}, el
-\textit{bucket} y el nombre del objeto, incorporando el \gls{jwt} en la cabecera; el
-nombre del clip combina una marca temporal y el identificador del robot. El
-extracto~\ref{lst:deteccion} resume esta lógica.
+El nodo \texttt{detect\_incident} materializa la percepción del sistema: se suscribe
+a la imagen en color de la cámara OAK-D y, en cada fotograma, decide si hay una
+incidencia, entendida como la presencia de una persona (clase \texttt{person}) con
+confianza superior a un umbral configurable. La elección del detector responde a un
+compromiso entre precisión y latencia: se ha optado por \gls{yolo} en su variante
+\textit{nano} (YOLOv8n), la más ligera de la familia, frente a las variantes
+\texttt{s} o \texttt{m}, porque la inferencia se ejecuta de forma continua sobre cada
+fotograma y el hardware del robot exige un modelo ligero; además, al reducirse la
+tarea a una decisión binaria, la mayor exactitud de los modelos grandes no resulta
+determinante. La inferencia corre en el equipo que aloja el nodo, no en la unidad de
+procesamiento de la propia cámara, y su rendimiento en tiempo real sobre el hardware
+objetivo aún no se ha caracterizado, al haberse validado el sistema solo en
+simulación.
 
-La elección del modelo responde a un compromiso entre precisión y latencia. Se ha
-optado por la variante \textit{nano} (YOLOv8n), la más ligera de la familia, frente a
-las variantes \texttt{s} o \texttt{m}, porque la inferencia se ejecuta de forma
-continua sobre cada fotograma y el hardware del TurtleBot~4 exige un modelo ligero
-para no sobrecargarlo; además, al reducirse la tarea a una decisión binaria
-(presencia o ausencia de personas), la mayor exactitud de las variantes grandes no
-resulta determinante. La inferencia se realiza en el equipo que aloja el nodo, no en
-la unidad de procesamiento de la cámara OAK-D. El rendimiento en tiempo real
-(fotogramas por segundo y latencia) sobre el hardware objetivo no se ha caracterizado
-todavía, al haberse validado el sistema únicamente en simulación; su medición queda
-pendiente. Por último, conviene precisar la composición del clip. El búfer circular
-tiene capacidad para cien fotogramas y, tras el disparo, el nodo graba cincuenta
-fotogramas más, que desplazan a los cincuenta previos más antiguos. El vídeo
-resultante consta, por tanto, de cien fotogramas (aproximadamente los cincuenta
-anteriores y los cincuenta posteriores al instante de la detección) y se codifica a
-una tasa fija de diez fotogramas por segundo, lo que equivale a unos diez segundos de
-grabación centrados en el suceso. El tamaño del búfer y del contador, así como la
-duración del enfriamiento, son parámetros ajustables; además, al ser fija la tasa de
-codificación, la fidelidad temporal del clip depende de la cadencia real de
-publicación de la cámara, no caracterizada en esta fase.
+El diseño persigue registrar el suceso con su contexto, no solo señalar el instante
+de la detección. Por eso el nodo mantiene un búfer circular (\texttt{deque}) con los
+últimos cien fotogramas y, al detectar una persona, graba además los cincuenta
+siguientes, de modo que el clip abarca aproximadamente los cinco segundos previos y
+los cinco posteriores al disparo. Cerrado el clip, un periodo de enfriamiento de
+30\,s evita que una misma persona genere una cascada de incidencias redundantes. El
+tamaño del búfer, el número de fotogramas posteriores y la duración del enfriamiento
+son parámetros ajustables. El extracto~\ref{lst:deteccion} recoge esta lógica de
+búfer, disparo y enfriamiento.
 
 \SuspendTagging{code}%
 \begin{pythoncode}[title={Lógica de detección con búfer y enfriamiento (detect\_incident.py)}, label={lst:deteccion}]
@@ -768,33 +864,15 @@ def image_callback(self, msg):
 \end{pythoncode}%
 \ResumeTagging{code}
 
-El extracto~\ref{lst:incident-io} muestra, a su vez, el trabajo del hilo de
-entrada/salida: la codificación del clip con OpenCV, su subida a MinIO y la
-publicación del aviso en Kafka con el \gls{jwt} en la cabecera.
-
-\SuspendTagging{code}%
-\begin{pythoncode}[title={Creación y subida del clip (detect\_incident.py)}, label={lst:incident-io}]
-def process_incident_io(self, frames, timestamp):
-    base = f'incident_{timestamp}_{os.getenv("ROBOT_ID")}.mp4'
-    path = f'tmp/{base}'
-    if frames:                                   # Codifica el clip con OpenCV.
-        h, w = frames[0].shape[:2]
-        writer = cv2.VideoWriter(
-            path, cv2.VideoWriter_fourcc(*'mp4v'), 10.0, (w, h))
-        for frame in frames:
-            writer.write(frame)
-        writer.release()
-    self.s3_client.upload_file(path, os.getenv("MINIO_BUCKET_NAME"), base)
-    os.remove(path)                              # Sube a MinIO y borra el temporal.
-    payload = {"robot_id": os.getenv("ROBOT_ID"),
-               "bucket_name": os.getenv("MINIO_BUCKET_NAME"),
-               "video_filename": base}
-    headers = [("Authorization", f"Bearer {self.current_token}".encode())]
-    self.kafkaProducer.produce(os.getenv("KAFKA_INCIDENT_TOPIC"),
-                               value=json.dumps(payload), headers=headers)
-    self.kafkaProducer.flush()                   # Publica el aviso con el JWT.
-\end{pythoncode}%
-\ResumeTagging{code}
+El trabajo pesado se delega en un hilo de entrada/salida independiente, de modo que
+la captura de imágenes no se interrumpe mientras se procesa la incidencia. Ese hilo
+codifica el clip en \texttt{mp4} con OpenCV, lo sube al almacén de objetos MinIO y
+publica en el bus de eventos un aviso con el identificador del robot, el
+\textit{bucket} y el nombre del clip, firmado con el \gls{jwt} del robot. La imagen,
+por tanto, no viaja por el bus: el evento solo transporta una referencia al vídeo ya
+almacenado, y el flujo de notificación descrito en la
+sección~\ref{sec:flujo-telemetria} convierte ese aviso en una incidencia consultable
+desde la aplicación.
 
 % ---------------------------------------------------------------------------
 \subsection{Telemetría: serve\_telemetry}
@@ -810,10 +888,72 @@ limitan a actualizar un diccionario de estado interno (porcentaje y voltaje de
 batería, posición, velocidades lineal y angular e indicadores booleanos), que actúa
 como última instantánea conocida. Un temporizador independiente publica ese
 diccionario consolidado en Kafka una vez por segundo, añadiéndole el \texttt{robot\_id}
-y una marca temporal e incorporando el \gls{jwt} del robot en la cabecera del mensaje.
-La publicación emplea \texttt{poll(0)} para no bloquear el \textit{executor}, y el
-token se obtiene del servicio \texttt{get\_robot\_token} de la misma forma no
-bloqueante que en los demás nodos.
+y una marca temporal e incorporando el \gls{jwt} del robot en la cabecera del mensaje;
+el token se obtiene del servicio \texttt{get\_robot\_token} de la misma forma no
+bloqueante que en los demás nodos. La tabla~\ref{tab:telemetria} detalla los campos que
+componen cada mensaje, con su tipo y la suscripción de la que proceden, y el
+extracto~\ref{lst:telemetria-json} muestra un ejemplo del mensaje JSON publicado.
+
+Estos mensajes alimentan el flujo de telemetría descrito en la
+sección~\ref{sec:flujo-telemetria}: el backend los consume y los almacena en InfluxDB, y
+Grafana los representa en un panel (figura~\ref{fig:grafana}) que permite seguir el
+estado del robot en tiempo real.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Campos del mensaje de telemetría, con su tipo y la suscripción de origen. Fuente: elaboración propia.}
+  \label{tab:telemetria}
+  \begin{tabular}{@{}>{\ttfamily}l l >{\ttfamily}l >{\raggedright\arraybackslash}p{5.2cm}@{}}
+    \toprule
+    \textbf{\normalfont Campo} & \textbf{Tipo} & \textbf{\normalfont Origen} &
+    \textbf{Descripción} \\
+    \midrule
+    robot\_id        & cadena   & ROBOT\_ID       & Identificador único del robot (variable de entorno). \\
+    timestamp        & número   & time.time()     & Marca temporal Unix del envío, en segundos. \\
+    bateria          & número   & /battery\_state & Nivel de batería en porcentaje (0--100). \\
+    bateria\_voltaje & número   & /battery\_state & Voltaje de la batería (V). \\
+    pos\_x           & número   & /odom           & Coordenada X en el mapa (m). \\
+    pos\_y           & número   & /odom           & Coordenada Y en el mapa (m). \\
+    vel\_linear      & número   & /odom           & Velocidad lineal (m/s). \\
+    vel\_angular     & número   & /odom           & Velocidad angular (rad/s). \\
+    is\_docked       & booleano & /dock\_status   & El robot está atracado en su base. \\
+    is\_kidnapped    & booleano & /kidnap\_status & El robot ha sido levantado del suelo. \\
+    is\_slipping     & booleano & /slip\_status   & Las ruedas patinan sin tracción efectiva. \\
+    wheels\_enabled  & booleano & /wheel\_status  & Los motores de las ruedas están habilitados. \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\SuspendTagging{code}%
+\begin{jsoncode}[title={Ejemplo de mensaje de telemetría (topic robot\_telemetry)}, label={lst:telemetria-json}]
+{
+  "robot_id": "turtlebot4-01",
+  "timestamp": 1751131234.512,
+  "bateria": 87.5,
+  "bateria_voltaje": 16.2,
+  "is_docked": false,
+  "pos_x": 3.42,
+  "pos_y": -1.18,
+  "vel_linear": 0.21,
+  "vel_angular": 0.05,
+  "is_kidnapped": false,
+  "is_slipping": false,
+  "wheels_enabled": true
+}
+\end{jsoncode}%
+\ResumeTagging{code}
+
+\begin{figure}[H]
+  \centering
+  \IfFileExists{recursos/figuras/grafana/dashboard.png}
+    {\includegraphics[width=0.9\textwidth, alt={Panel de Grafana con la telemetría del robot en tiempo real}]{recursos/figuras/grafana/dashboard.png}}
+    {\fbox{\parbox[c][5cm][c]{0.9\textwidth}{\centering\itshape Captura del panel de Grafana (pendiente de incorporar en \texttt{recursos/figuras/grafana/dashboard.png}).}}}
+  \caption{Panel de Grafana que visualiza la telemetría del robot en tiempo real. Fuente: elaboración propia.}
+  \label{fig:grafana}
+\end{figure}
+
+\FloatBarrier
 
 % ---------------------------------------------------------------------------
 \subsection{Gestión de secretos: secret\_helper}
@@ -839,7 +979,82 @@ que gestionar credenciales, el nodo publica el servicio \gls{ros}
 disponibilidad (\texttt{is\_ready}); los consumidores lo invocan de forma no
 bloqueante (mediante \texttt{call\_async} y un \textit{callback} de finalización) para
 no detener el \textit{executor} de hilo único, y reintentan si el token todavía no
-está disponible.
+está disponible. Las figuras~\ref{fig:tofu} y~\ref{fig:token} resumen, respectivamente,
+el arranque inicial con autenticación y la forma en que el resto de nodos obtienen y
+emplean el token.
+
+\begin{figure}[htbp]
+  \centering
+  \usetikzlibrary{arrows.meta}%
+  \begin{tikzpicture}[
+      actor/.style={draw=black!75, rounded corners=2pt, fill=blue!5,
+        font=\footnotesize\bfseries, align=center, minimum height=7mm, inner sep=4pt},
+      life/.style={dashed, draw=black!45},
+      msg/.style={->, line width=0.6pt, draw=black!80},
+      ret/.style={->, line width=0.6pt, draw=black!80, dashed},
+      etq/.style={font=\scriptsize, inner sep=2pt, fill=white},
+      note/.style={draw=black!50, fill=yellow!12, rounded corners=2pt,
+        font=\scriptsize, align=center, inner sep=3pt}
+    ]
+    \node[actor] (sh)  at (0,0)  {secret\_helper};
+    \node[actor] (vol) at (5,0)  {Volumen local\\(\texttt{SECRET\_PATH})};
+    \node[actor] (be)  at (10,0) {Backend\\(FastAPI)};
+    \foreach \i [evaluate=\i as \yy using -0.7*\i-0.4] in {1,...,8} {
+      \coordinate (r\i) at (0,\yy); }
+    \draw[life] (sh.south)  -- (sh|-r8);
+    \draw[life] (vol.south) -- (vol|-r8);
+    \draw[life] (be.south)  -- (be|-r8);
+    \draw[msg] (sh|-r1)  -- node[etq,above]{leer secreto local} (vol|-r1);
+    \draw[ret] (vol|-r2) -- node[etq,above]{no existe: primer arranque} (sh|-r2);
+    \draw[msg] (sh|-r3)  -- node[etq,above]{\texttt{POST /robot/\{id\}/first-boot}} (be|-r3);
+    \draw[ret] (be|-r4)  -- node[etq,above]{\texttt{200 \{secret\}}} (sh|-r4);
+    \draw[msg] (sh|-r5)  -- node[etq,above]{persistir secreto} (vol|-r5);
+    \draw[msg] (sh|-r6)  -- node[etq,above]{\texttt{POST /robot/\{id\}/auth} (\texttt{secret\_key})} (be|-r6);
+    \draw[ret] (be|-r7)  -- node[etq,above]{\texttt{200 \{access\_token\}} (JWT, 24 h)} (sh|-r7);
+    \node[note] at (5,-6.5) {Refresco proactivo del JWT cada 3600 s;\\
+      si la autenticación falla, reintento cada 10 s.};
+  \end{tikzpicture}
+  \caption[Arranque inicial y autenticación de secret\_helper]{Secuencia del
+    arranque inicial (\textit{first boot}, \gls{tofu}) y la autenticación de
+    \texttt{secret\_helper}: si no hay secreto local, lo solicita al backend y lo
+    persiste; después lo intercambia por un \gls{jwt} que renueva de forma periódica.
+    Fuente: elaboración propia.}
+  \label{fig:tofu}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \usetikzlibrary{arrows.meta}%
+  \begin{tikzpicture}[
+      actor/.style={draw=black!75, rounded corners=2pt, fill=blue!5,
+        font=\footnotesize\bfseries, align=center, minimum height=7mm, inner sep=4pt},
+      life/.style={dashed, draw=black!45},
+      msg/.style={->, line width=0.6pt, draw=black!80},
+      ret/.style={->, line width=0.6pt, draw=black!80, dashed},
+      etq/.style={font=\scriptsize, inner sep=2pt, fill=white},
+      note/.style={draw=black!50, fill=yellow!12, rounded corners=2pt,
+        font=\scriptsize, align=center, inner sep=3pt}
+    ]
+    \node[actor] (nodo)  at (0,0)  {detect\_incident /\\serve\_telemetry};
+    \node[actor] (sh)    at (5,0)  {secret\_helper};
+    \node[actor] (kafka) at (10,0) {Kafka};
+    \foreach \i [evaluate=\i as \yy using -0.8*\i-0.4] in {1,...,4} {
+      \coordinate (r\i) at (0,\yy); }
+    \draw[life] (nodo.south)  -- (nodo|-r4);
+    \draw[life] (sh.south)    -- (sh|-r4);
+    \draw[life] (kafka.south) -- (kafka|-r4);
+    \draw[msg] (nodo|-r1) -- node[etq,above]{\texttt{get\_robot\_token} (\texttt{call\_async})} (sh|-r1);
+    \draw[ret] (sh|-r2)   -- node[etq,above]{\texttt{token} + \texttt{is\_ready}} (nodo|-r2);
+    \draw[msg] (nodo|-r3) -- node[etq,above]{evento + cabecera \texttt{Authorization: Bearer}} (kafka|-r3);
+    \node[note] at (5,-4.2) {Si \texttt{is\_ready} es falso, el nodo reintenta\\
+      sin bloquear el \textit{executor}.};
+  \end{tikzpicture}
+  \caption[Obtención y uso del JWT por el resto de nodos]{Los nodos consumidores
+    obtienen el \gls{jwt} del servicio \texttt{get\_robot\_token} de
+    \texttt{secret\_helper} y lo adjuntan en la cabecera \texttt{Authorization: Bearer}
+    de los mensajes que publican en Kafka. Fuente: elaboración propia.}
+  \label{fig:token}
+\end{figure}
 
 Conviene reconocer la principal asunción de este patrón: la confianza depositada en
 el primer contacto. Si un atacante se adelantara al robot legítimo y completara el
@@ -858,6 +1073,12 @@ endurecimiento de este arranque inicial queda como limitación conocida.
 \newtcblisting[use counter=listing, list inside=lol, list type=listing]{dartcode}[1][]{%
   vscode-light-linenos, minted language=dart, title={Dart},
   list entry={\protect\numberline{\thelisting}Dart}, #1}
+% Declarar un \newtcblisting con 'use counter=listing' dentro del documento
+% reinicia \thelisting al formato plano (\arabic), deshaciendo el prefijo por
+% capítulo que fija \counterwithin{listing}{chapter} en el preámbulo. Sin esta
+% línea, el Índice de Códigos y las referencias perderían el prefijo (p. ej.
+% «13» en lugar de «5.13», «1» en lugar de «7.1»). Se restaura aquí.
+\renewcommand{\thelisting}{\thechapter.\arabic{listing}}
 
 La aplicación con la que interactúa el usuario está desarrollada en \textit{Flutter}, lo
 que permite desplegarla en múltiples plataformas (móvil, web y escritorio) desde un único
@@ -907,9 +1128,9 @@ redirect: (context, state) {
 \end{dartcode}%
 \ResumeTagging{code}
 
-\begin{figure}[htbp]
+\begin{figure}[H]
   \centering
-  \includegraphics[width=0.38\textwidth]{recursos/figuras/app/menu.png}
+  \includegraphics[width=0.30\textwidth]{recursos/figuras/app/menu.png}
   \caption[Menú de navegación de la aplicación]{Menú lateral de navegación, con acceso a
     las secciones y al cierre de sesión. Fuente: elaboración propia.}
   \label{fig:app-menu}
@@ -957,16 +1178,51 @@ pestañas, el inicio de sesión (correo y contraseña) y el registro de un nuevo
 (nombre, correo, contraseña y teléfono opcional). Un registro correcto inicia sesión de
 forma automática, de modo que el usuario accede directamente a la aplicación.
 
-\begin{figure}[htbp]
+\paragraph*{Inicio.} La pantalla principal, «WARDEN» (figura~\ref{fig:app-inicio}), lista
+los robots del usuario con su estado de conexión y operativo, y permite iniciar o detener
+la patrulla de cada uno mediante un conmutador. Un indicador general resume si el conjunto
+está desarmado o asegurado. La pantalla sondea el estado real cada cinco segundos para
+reflejar el \textit{heartbeat} del robot e impide detener un robot que todavía se está
+configurando (mapeando), mostrando un aviso si se intenta. Ofrece además ayuda contextual
+y el conmutador de tema claro y oscuro.
+
+\paragraph*{Robots.} La pantalla de robots (figura~\ref{fig:app-robots}) gestiona el parque
+de robots del usuario. Cada robot permite editar su alias, reinstalarlo (lo que borra su
+mapa y reinicia el ciclo, con confirmación previa), abrir su panel de telemetría en Grafana
+y eliminarlo. El alta de un robot se realiza mediante un diálogo que solicita su
+identificador y un alias.
+
+\paragraph*{Incidencias y detalle.} El listado de incidencias
+(figura~\ref{fig:app-incidencias}) muestra cada suceso con un identificador abreviado, el
+robot que lo originó, la fecha y su estado (revisado o pendiente). Al abrir el detalle, la
+aplicación reproduce el clip de vídeo asociado mediante un reproductor incrustado que carga
+la \acrshort{url} prefirmada de MinIO, con repliegue a la apertura en el navegador si la
+reproducción falla. El detalle ofrece además un acceso directo para avisar a las
+autoridades.
+
+\paragraph*{Perfil.} La pantalla de perfil (figura~\ref{fig:app-perfil}) permite consultar
+y editar los datos personales del usuario, así como cambiar la contraseña, en dos
+formularios independientes.
+
+\paragraph*{Administración.} Disponible solo para administradores, el panel de
+administración (figura~\ref{fig:app-admin}) se organiza en tres pestañas: usuarios, donde
+se conceden o revocan privilegios de administrador y se eliminan cuentas; robots, donde se
+listan y eliminan los robots del sistema; e incidencias, donde se consultan las de un robot
+concreto a partir de su identificador.
+
+Las figuras~\ref{fig:app-acceso} a~\ref{fig:app-admin} recogen las capturas de las
+pantallas descritas, en el mismo orden en que se han presentado.
+
+\begin{figure}[H]
   \centering
-  \begin{subfigure}[t]{0.40\textwidth}
+  \begin{subfigure}[t]{0.32\textwidth}
     \centering
     \includegraphics[width=\linewidth]{recursos/figuras/app/login.png}
     \caption{Inicio de sesión.}
     \label{fig:app-login}
   \end{subfigure}
   \hfill
-  \begin{subfigure}[t]{0.40\textwidth}
+  \begin{subfigure}[t]{0.32\textwidth}
     \centering
     \includegraphics[width=\linewidth]{recursos/figuras/app/register.png}
     \caption{Registro de usuario.}
@@ -977,24 +1233,16 @@ forma automática, de modo que el usuario accede directamente a la aplicación.
   \label{fig:app-acceso}
 \end{figure}
 
-\paragraph*{Inicio.} La pantalla principal, «WARDEN» (figura~\ref{fig:app-inicio}), lista
-los robots del usuario con su estado de conexión y operativo, y permite iniciar o detener
-la patrulla de cada uno mediante un conmutador. Un indicador general resume si el conjunto
-está desarmado o asegurado. La pantalla sondea el estado real cada cinco segundos para
-reflejar el \textit{heartbeat} del robot e impide detener un robot que todavía se está
-configurando (mapeando), mostrando un aviso si se intenta. Ofrece además ayuda contextual
-y el conmutador de tema claro y oscuro.
-
-\begin{figure}[htbp]
+\begin{figure}[H]
   \centering
-  \begin{subfigure}[t]{0.40\textwidth}
+  \begin{subfigure}[t]{0.32\textwidth}
     \centering
     \includegraphics[width=\linewidth]{recursos/figuras/app/home.png}
     \caption{Lista de robots y estado.}
     \label{fig:app-home}
   \end{subfigure}
   \hfill
-  \begin{subfigure}[t]{0.40\textwidth}
+  \begin{subfigure}[t]{0.32\textwidth}
     \centering
     \includegraphics[width=\linewidth]{recursos/figuras/app/howto-light.png}
     \caption{Ayuda contextual (tema claro).}
@@ -1005,22 +1253,16 @@ y el conmutador de tema claro y oscuro.
   \label{fig:app-inicio}
 \end{figure}
 
-\paragraph*{Robots.} La pantalla de robots (figura~\ref{fig:app-robots}) gestiona el parque
-de robots del usuario. Cada robot permite editar su alias, reinstalarlo (lo que borra su
-mapa y reinicia el ciclo, con confirmación previa), abrir su panel de telemetría en Grafana
-y eliminarlo. El alta de un robot se realiza mediante un diálogo que solicita su
-identificador y un alias.
-
-\begin{figure}[htbp]
+\begin{figure}[H]
   \centering
-  \begin{subfigure}[t]{0.40\textwidth}
+  \begin{subfigure}[t]{0.32\textwidth}
     \centering
     \includegraphics[width=\linewidth]{recursos/figuras/app/robots.png}
     \caption{Parque de robots.}
     \label{fig:app-robots-lista}
   \end{subfigure}
   \hfill
-  \begin{subfigure}[t]{0.40\textwidth}
+  \begin{subfigure}[t]{0.32\textwidth}
     \centering
     \includegraphics[width=\linewidth]{recursos/figuras/app/new-robot.png}
     \caption{Alta de un robot.}
@@ -1031,24 +1273,16 @@ identificador y un alias.
   \label{fig:app-robots}
 \end{figure}
 
-\paragraph*{Incidencias y detalle.} El listado de incidencias
-(figura~\ref{fig:app-incidencias}) muestra cada suceso con un identificador abreviado, el
-robot que lo originó, la fecha y su estado (revisado o pendiente). Al abrir el detalle, la
-aplicación reproduce el clip de vídeo asociado mediante un reproductor incrustado que carga
-la \gls{url} prefirmada de MinIO, con repliegue a la apertura en el navegador si la
-reproducción falla. El detalle ofrece además un acceso directo para avisar a las
-autoridades.
-
-\begin{figure}[htbp]
+\begin{figure}[H]
   \centering
-  \begin{subfigure}[t]{0.40\textwidth}
+  \begin{subfigure}[t]{0.32\textwidth}
     \centering
     \includegraphics[width=\linewidth]{recursos/figuras/app/incidents.png}
     \caption{Listado de incidencias.}
     \label{fig:app-incidents}
   \end{subfigure}
   \hfill
-  \begin{subfigure}[t]{0.40\textwidth}
+  \begin{subfigure}[t]{0.32\textwidth}
     \centering
     \includegraphics[width=\linewidth]{recursos/figuras/app/incident-details.png}
     \caption{Detalle con reproducción del vídeo.}
@@ -1059,25 +1293,15 @@ autoridades.
   \label{fig:app-incidencias}
 \end{figure}
 
-\paragraph*{Perfil.} La pantalla de perfil (figura~\ref{fig:app-perfil}) permite consultar
-y editar los datos personales del usuario, así como cambiar la contraseña, en dos
-formularios independientes.
-
-\begin{figure}[htbp]
+\begin{figure}[H]
   \centering
-  \includegraphics[width=0.40\textwidth]{recursos/figuras/app/profile.png}
+  \includegraphics[width=0.30\textwidth]{recursos/figuras/app/profile.png}
   \caption[Pantalla de perfil]{Pantalla de perfil, con la edición de datos personales y el
     cambio de contraseña. Fuente: elaboración propia.}
   \label{fig:app-perfil}
 \end{figure}
 
-\paragraph*{Administración.} Disponible solo para administradores, el panel de
-administración (figura~\ref{fig:app-admin}) se organiza en tres pestañas: usuarios, donde
-se conceden o revocan privilegios de administrador y se eliminan cuentas; robots, donde se
-listan y eliminan los robots del sistema; e incidencias, donde se consultan las de un robot
-concreto a partir de su identificador.
-
-\begin{figure}[htbp]
+\begin{figure}[H]
   \centering
   \begin{subfigure}[t]{0.31\textwidth}
     \centering

@@ -295,6 +295,20 @@ mensaje de error → confirma el manejo de fallos. ✅
 **Objetivo:** máquina de estados completa (exploración → guardar mapa → planificar → patrullar)
 + comandos Kafka + heartbeat.
 
+> **Dos modos de arranque (se eligen solos).** `patrol_nav` distingue entre:
+> - **Mapeo** (no hay mapa): Nav2 con **SLAM**; el robot explora, guarda `mapa_patrulla.*` y patrulla.
+> - **Operación** (ya existe `mapa_patrulla.*`): Nav2 en **localización** (map_server + AMCL); el nodo
+>   publica la pose inicial en el dock y patrulla directamente, sin re-explorar.
+>
+> El launch `patrol_bringup.launch.py` mira si existe `mapa_patrulla.yaml` y arranca el stack
+> correcto (SLAM o localización) pasando `use_localization` al nodo. Así no se elige a mano, y
+> tras un `reinstall` (que borra el mapa) el siguiente lanzamiento vuelve a SLAM solo. Comando único:
+> `ros2 launch patrol_nav patrol_bringup.launch.py sim:=true`.
+> Las terminales 1–3 de abajo son la versión **manual** equivalente (útil para depurar paso a paso).
+>
+> **Acople:** con `use_dock_action:=true` (por defecto) el robot hace `undock` antes de conducir y
+> `dock` (acción del Create 3) al volver al dock. Ponlo a `false` si tu entorno no expone esas acciones.
+
 > Esta fase usa el **mismo contenedor `ros2_humble_dev`** (el compose ya monta WSLg para la GUI; no
 > requiere `network_mode: host`). `nav2-simple-commander` e `irobot-create-msgs` ya están en la imagen;
 > el único paso extra de esta fase es compilar `explore_lite` desde fuente (abajo). Lanza el simulador
@@ -356,9 +370,17 @@ desde el contenedor es `host.docker.internal`, no `localhost`) y comprueba en el
 `estado_operativo` cambia (`exploring`, `patrolling`, `stopped`...). `patrol_nav` llama a
 `POST {server_url}/robot/heartbeat`.
 
-> **Atajo si no quieres explorar:** coloca un `mapa_patrulla.pgm`+`.yaml` previo en `/robot_ws/src/`
-> y arranca el nodo directamente; aun así el estado inicial es `EXPLORING`, por lo que para saltar
-> a patrulla tendrías que ajustar el estado inicial en el código.
+> **Atajo si no quieres explorar (modo operación):** con `mapa_patrulla.pgm`+`.yaml` ya en
+> `/robot_ws/src/`, lanza el simulador en localización y el nodo con `use_localization:=true`:
+> ```bash
+> # Terminal 1: sim en localización cargando el mapa (en vez de slam:=true)
+> ros2 launch turtlebot4_ignition_bringup turtlebot4_ignition.launch.py \
+>   localization:=true nav2:=true rviz:=true world:=maze map:=src/mapa_patrulla.yaml
+> # Terminal 3: el nodo en modo localización (publica la pose inicial en el dock)
+> ros2 run patrol_nav patrol_nav --ros-args -p robot_id:=RBT-01 -p use_localization:=true
+> ```
+> `start_patrol` salta a `PLANNING` y patrulla sin re-explorar. O, más simple, deja que
+> `patrol_bringup.launch.py` lo elija solo según exista el mapa.
 
 ---
 

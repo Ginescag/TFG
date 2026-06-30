@@ -15,8 +15,12 @@ from geometry_msgs.msg import PoseStamped
 from nav2_msgs.srv import SaveMap
 from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
 from nav_msgs.msg import Odometry
+from rclpy.action import ActionClient
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 
+from irobot_create_msgs.action import Dock, Undock
+from irobot_create_msgs.msg import DockStatus
 from secret_helper_interfaces.srv import GetToken
 
 class PatrolOrchestrator(Node):
@@ -36,6 +40,12 @@ class PatrolOrchestrator(Node):
         self.declare_parameter('kafka_robot_commands_topic', os.getenv('KAFKA_ROBOT_COMMANDS_TOPIC', 'robot_commands'))
         self.declare_parameter('server_url', os.getenv('SERVER_URL', ''))
         self.declare_parameter('heartbeat_interval_secs', 10.0)
+        # use_localization: True -> Nav2 con map_server + AMCL (operar mapa guardado);
+        # False -> SLAM (mapear). Lo fija normalmente patrol_bringup.launch.py según
+        # exista o no el mapa.
+        self.declare_parameter('use_localization', False)
+        # use_dock_action: usar las acciones /undock y /dock del Create 3 (acople real).
+        self.declare_parameter('use_dock_action', True)
 
         self.map_filepath = self.get_parameter('map_filepath').value
         self.grid_spacing_m = float(self.get_parameter('grid_spacing_m').value)
@@ -51,6 +61,8 @@ class PatrolOrchestrator(Node):
         self.kafka_robot_commands_topic = str(self.get_parameter('kafka_robot_commands_topic').value).strip()
         self.server_url = str(self.get_parameter('server_url').value).strip().rstrip('/')
         self.heartbeat_interval_secs = float(self.get_parameter('heartbeat_interval_secs').value)
+        self.use_localization = bool(self.get_parameter('use_localization').value)
+        self.use_dock_action = bool(self.get_parameter('use_dock_action').value)
 
         # Token JWT gestionado por secret_helper (servicio get_robot_token), cacheado.
         self.token_client = self.create_client(GetToken, 'get_robot_token')
@@ -67,7 +79,20 @@ class PatrolOrchestrator(Node):
         self.explore_start_time = None
         self.active_task = None
 
+        # Docking (Create 3). is_docked se actualiza desde /dock_status.
+        self.is_docked = None
+        self.post_undock_state = None   # a dónde ir tras desacoplar
+        self.stopped_settled = False    # True cuando la secuencia de parada ya terminó
+        self.undock_goal_future = None
+        self.undock_result_future = None
+        self.dock_goal_future = None
+        self.dock_result_future = None
+        self.undock_action_client = ActionClient(self, Undock, 'undock')
+        self.dock_action_client = ActionClient(self, Dock, 'dock')
+
         self.odom_sub = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
+        self.dock_status_sub = self.create_subscription(
+            DockStatus, 'dock_status', self.dock_status_callback, qos_profile_sensor_data)
  
         # Canonical vocabulary shared with the server.
         # Each internal FSM state maps to the exact string accepted by the heartbeat.
@@ -78,6 +103,8 @@ class PatrolOrchestrator(Node):
             'PLANNING':       'planning',
             'PATROLLING':     'patrolling',
             'PATROL_STOPPED': 'stopped',
+            'UNDOCKING':      'planning',
+            'DOCKING':        'stopped',
         }
 
         self.command_consumer = None
@@ -93,12 +120,13 @@ class PatrolOrchestrator(Node):
         else:
             self.get_logger().error('Kafka command consumer not started due to missing config.')
 
-        self.get_logger().info('Waiting for Nav2 (bt_navigator) to become active...')
-        # En modo SLAM no existe amcl, y slam_toolbox corre sin lifecycle gestionable
-        # (no expone get_state). El gate real para enviar goals es bt_navigator, así que
-        # esperamos solo a él. Con localizer='bt_navigator', waitUntilNav2Active espera a
-        # bt_navigator y se salta _waitForInitialPose (que solo corre si localizer=='amcl').
-        self.navigator.waitUntilNav2Active(localizer='bt_navigator')
+        if self.use_localization:
+            self.get_logger().info('Localization mode: seeding initial pose at dock and waiting for amcl...')
+            self.navigator.setInitialPose(self.dock_pose)
+            self.navigator.waitUntilNav2Active()
+        else:
+            self.get_logger().info('SLAM mode: waiting for Nav2 (bt_navigator) to become active...')
+            self.navigator.waitUntilNav2Active(localizer='bt_navigator')
 
         self.timer = self.create_timer(1.0, self.state_machine)
         self.command_timer = self.create_timer(0.5, self.poll_command_topic)
@@ -152,6 +180,9 @@ class PatrolOrchestrator(Node):
             self.last_move_time = now
             self.last_pose = msg.pose.pose.position
 
+    def dock_status_callback(self, msg: DockStatus):
+        self.is_docked = msg.is_docked
+
     def get_estado_operativo(self) -> str:
         """
         Translates the internal FSM state to the string the server expects.
@@ -203,6 +234,10 @@ class PatrolOrchestrator(Node):
             self.run_patrol_cycle()
         elif self.state == 'PATROL_STOPPED':
             self.run_patrol_stopped()
+        elif self.state == 'UNDOCKING':
+            self.run_undocking()
+        elif self.state == 'DOCKING':
+            self.run_docking()
 
     def poll_command_topic(self):
         if self.command_consumer is None:
@@ -244,20 +279,44 @@ class PatrolOrchestrator(Node):
     def _map_exists(self):
         return os.path.exists(f'{self.map_filepath}.pgm') and os.path.exists(f'{self.map_filepath}.yaml')
 
+    def _begin(self, target_state):
+        """Transición a un estado que implica conducir, desacoplando antes si hace falta.
+
+        Nav2 no puede mover el robot mientras está acoplado, así que si está en el dock
+        pasamos primero por UNDOCKING y guardamos a dónde ir después.
+        """
+        if self.use_dock_action and self.is_docked:
+            self.get_logger().info(f'Robot is docked. Undocking before {target_state}.')
+            self.post_undock_state = target_state
+            self.state = 'UNDOCKING'
+        else:
+            self.state = target_state
+
     def handle_start_patrol(self):
         if self.state == 'IDLE':
             # Primer arranque: si ya hay mapa guardado, lo reutilizamos (PLANNING);
             # si no, hacemos el ciclo completo empezando por exploración.
             if self._map_exists():
                 self.get_logger().info('start_patrol: existing map found, skipping exploration -> PLANNING.')
-                self.state = 'PLANNING'
+                self._begin('PLANNING')
             else:
                 self.get_logger().info('start_patrol: no map found, beginning full cycle -> EXPLORING.')
-                self.state = 'EXPLORING'
+                self._begin('EXPLORING')
         elif self.state == 'PATROL_STOPPED':
-            self.get_logger().info('Received start_patrol. Resuming patrol.')
             self.active_task = None
-            self.state = 'PATROLLING'
+            self.stopped_settled = False
+            if self.waypoints_queue:
+                # Ya hay ruta cargada: reanudamos donde estaba.
+                self.get_logger().info('Received start_patrol. Resuming patrol.')
+                self._begin('PATROLLING')
+            elif self._map_exists():
+                # Llegamos a STOPPED sin ruta (p. ej. stop_patrol desde IDLE).
+                # Regeneramos la patrulla a partir del mapa guardado.
+                self.get_logger().info('start_patrol with no route loaded: replanning from saved map -> PLANNING.')
+                self._begin('PLANNING')
+            else:
+                self.get_logger().info('start_patrol with no route and no map: starting full cycle -> EXPLORING.')
+                self._begin('EXPLORING')
         elif self.state == 'PATROLLING':
             # Idempotent: already patrolling, nothing to do.
             self.get_logger().info('start_patrol received but robot is already PATROLLING. Ignoring.')
@@ -275,11 +334,17 @@ class PatrolOrchestrator(Node):
             if self.explore_process is not None:
                 self.explore_process.terminate()
                 self.explore_process = None
-            # Bug fix: clear any pending map-save future so it does not remain
-            # orphaned when SAVING_MAP is interrupted mid-flight.
             if self.save_map_future is not None:
                 self.get_logger().warn('Map save interrupted by stop_patrol. Discarding pending future.')
                 self.save_map_future = None
+            # Descarta cualquier (des)acople en vuelo para que la secuencia de parada
+            # empiece limpia.
+            self.undock_goal_future = None
+            self.undock_result_future = None
+            self.dock_goal_future = None
+            self.dock_result_future = None
+            self.post_undock_state = None
+            self.stopped_settled = False
             self.state = 'PATROL_STOPPED'
         else:
             self.get_logger().info('stop_patrol ignored; already stopped.')
@@ -293,6 +358,12 @@ class PatrolOrchestrator(Node):
             self.navigator.cancelTask()
             self.active_task = None
         self.save_map_future = None
+        self.undock_goal_future = None
+        self.undock_result_future = None
+        self.dock_goal_future = None
+        self.dock_result_future = None
+        self.post_undock_state = None
+        self.stopped_settled = False
         self.waypoints_queue.clear()
         for ext in ('.pgm', '.yaml'):
             path = f'{self.map_filepath}{ext}'
@@ -300,6 +371,13 @@ class PatrolOrchestrator(Node):
                 os.remove(path)
                 self.get_logger().info(f'Deleted old map file: {path}')
         self.state = 'IDLE'
+        # No se puede remapear en la sesión actual (explore_lite necesita SLAM y, en
+        # localización, map_server ya sirve un mapa fijo). Hay que relanzar: sin mapa en
+        # disco, patrol_bringup.launch.py arranca en SLAM automáticamente.
+        self.get_logger().warn(
+            'Map wiped. Relaunch the bringup to remap: with no saved map present, '
+            'patrol_bringup.launch.py will come up in SLAM mode automatically.'
+        )
 
     def destroy_node(self):
         if self.command_consumer is not None:
@@ -436,14 +514,13 @@ class PatrolOrchestrator(Node):
         self.active_task = None
 
     def run_patrol_stopped(self):
+        if self.stopped_settled:
+            return
+
         if self.active_task != 'return_to_dock':
             if self.active_task is not None:
                 self.get_logger().info('Patrol stopped by user. Canceling active navigation task.')
                 self.navigator.cancelTask()
-                # Bug fix: Nav2 processes cancellations asynchronously. We must wait
-                # for the current task to actually finish (CANCELED or FAILED) before
-                # issuing goToPose, otherwise the two commands race inside Nav2.
-                # isTaskComplete() returns True once the result (any result) is available.
                 if not self.navigator.isTaskComplete():
                     self.get_logger().info('Waiting for active task to be canceled before returning to dock...')
                     return  # Come back next timer tick (1 s) and check again
@@ -457,14 +534,90 @@ class PatrolOrchestrator(Node):
             return
 
         result = self.navigator.getResult()
+        self.active_task = None
         if result == TaskResult.SUCCEEDED:
-            self.get_logger().info('Dock reached. Patrol is stopped.')
+            self.get_logger().info('Dock approach reached.')
+            if self.use_dock_action:
+                # Acople fino final con la acción del Create 3.
+                self.get_logger().info('Docking with the charging station...')
+                self.state = 'DOCKING'
+                return
         elif result == TaskResult.CANCELED:
             self.get_logger().warn('Return to dock canceled. Patrol is stopped anyway.')
         else:
             self.get_logger().error('Failed to reach dock. Patrol is stopped anyway.')
 
+        self.get_logger().info('Patrol is stopped.')
+        self.stopped_settled = True
+
+    def run_undocking(self):
+        if not self.use_dock_action or not self.is_docked:
+            # Nada que desacoplar (o acople deshabilitado): seguimos al estado destino.
+            self._finish_undock()
+            return
+
+        if self.undock_goal_future is None and self.undock_result_future is None:
+            if not self.undock_action_client.wait_for_server(timeout_sec=1.0):
+                self.get_logger().warn('Undock action server not available yet. Waiting...')
+                return
+            self.get_logger().info('Sending undock goal...')
+            self.undock_goal_future = self.undock_action_client.send_goal_async(Undock.Goal())
+            return
+
+        if self.undock_result_future is None:
+            if not self.undock_goal_future.done():
+                return
+            goal_handle = self.undock_goal_future.result()
+            if not goal_handle.accepted:
+                self.get_logger().error('Undock goal rejected. Proceeding anyway.')
+                self._finish_undock()
+                return
+            self.undock_result_future = goal_handle.get_result_async()
+            return
+
+        if not self.undock_result_future.done():
+            return
+        self.get_logger().info('Undock completed.')
+        self._finish_undock()
+
+    def _finish_undock(self):
+        target = self.post_undock_state or 'PATROLLING'
+        self.post_undock_state = None
+        self.undock_goal_future = None
+        self.undock_result_future = None
+        self.state = target
+
+    def run_docking(self):
+        if self.dock_goal_future is None and self.dock_result_future is None:
+            if not self.dock_action_client.wait_for_server(timeout_sec=1.0):
+                self.get_logger().warn('Dock action server not available yet. Waiting...')
+                return
+            self.get_logger().info('Sending dock goal...')
+            self.dock_goal_future = self.dock_action_client.send_goal_async(Dock.Goal())
+            return
+
+        if self.dock_result_future is None:
+            if not self.dock_goal_future.done():
+                return
+            goal_handle = self.dock_goal_future.result()
+            if not goal_handle.accepted:
+                self.get_logger().error('Dock goal rejected. Patrol is stopped anyway.')
+                self._finish_dock()
+                return
+            self.dock_result_future = goal_handle.get_result_async()
+            return
+
+        if not self.dock_result_future.done():
+            return
+        self.get_logger().info('Dock completed. Robot is docked and stopped.')
+        self._finish_dock()
+
+    def _finish_dock(self):
+        self.dock_goal_future = None
+        self.dock_result_future = None
         self.active_task = None
+        self.stopped_settled = True
+        self.state = 'PATROL_STOPPED'
 
 def main(args=None):
     rclpy.init(args=args)

@@ -136,15 +136,28 @@ entrada ya no se inyecta a mano**, viene del hardware real.
   (`MESSAGE DISCARDED`).
 
 ### Fase D. `patrol_nav` (real)
-- En vez del simulador, lanza la pila real del TB4: SLAM con el LiDAR real
-  (`/scan`) y Nav2, más `map_saver_server`.
-- Arranca `patrol_nav` y recorre los estados: EXPLORING (el robot se mueve de
-  verdad, vigila el espacio físico), SAVING_MAP (genera `mapa_patrulla.pgm`),
-  PLANNING (ruta de cobertura) y PATROLLING (recorre los waypoints reales).
-- Comandos remotos: produce `start_patrol`/`stop_patrol` en `robot_commands`
-  (desde el PC o desde la app) y comprueba que el robot reacciona y vuelve al dock.
-- Heartbeat: con `server_url=http://IP_PC:8000`, el `estado_operativo` del robot
-  se refleja en la base de datos y en la app.
+- **Dos modos, se eligen solos según exista el mapa** (igual que en sim). Usa el launch
+  envoltorio con `sim:=false`, que arranca el stack del TB4 (`turtlebot4_navigation`
+  `slam.launch.py` o `localization.launch.py` + `nav2.launch.py`) y `patrol_nav` con el
+  `use_localization` correcto:
+  ```bash
+  ros2 launch patrol_nav patrol_bringup.launch.py sim:=false map_filepath:=<ruta>/mapa_patrulla
+  ```
+  - **Primera vez (mapeo):** sin mapa guardado arranca en SLAM con el LiDAR real (`/scan`);
+    recorre EXPLORING → SAVING_MAP (genera `mapa_patrulla.pgm`) → PLANNING → PATROLLING.
+    Necesita `map_saver_server` y `explore_lite` (ver checklist).
+  - **Operación (mapa ya guardado):** arranca en localización (map_server + AMCL); el nodo
+    publica la pose inicial en el dock y va directo a PLANNING → PATROLLING sin re-explorar.
+    **El robot debe arrancar físicamente en el dock** (pose inicial `(dock_x, dock_y, dock_yaw)`).
+- **Acople real:** con `use_dock_action:=true` (por defecto) el robot hace `undock` (acción
+  del Create 3) antes de moverse y `dock` al volver al dock, recargando de verdad. Verifica que
+  desacopla al empezar y se acopla al parar.
+- **Comandos remotos:** produce `start_patrol`/`stop_patrol` en `robot_commands` (desde el PC o
+  la app) y comprueba que el robot reacciona y vuelve al dock.
+- **Reinstall:** `reinstall` borra el mapa y vuelve a IDLE; al **relanzar** el envoltorio detecta
+  que no hay mapa y arranca en SLAM solo (para remapear desde cero).
+- **Heartbeat:** con `server_url=http://IP_PC:8000`, el `estado_operativo` del robot se refleja en
+  la base de datos y en la app.
 
 > Seguridad física en pruebas reales: ten a mano el botón de parada o `stop_patrol`,
 > empieza en un espacio despejado y con la batería cargada.

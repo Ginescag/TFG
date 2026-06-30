@@ -35,7 +35,7 @@ encadenamiento, repetido para cada funcionalidad (telemetría, incidencias,
 comandos de control y autenticación), garantizaba que cada extremo dispusiera ya
 de su contraparte y que cada incremento fuera verificable de principio a fin.
 
-Finalmente, todo el código se ha organizado como un \textbf{monorepo}, es decir,
+Finalmente, todo el código se ha organizado como un \textbf{repositorio monolítico}, es decir,
 un único repositorio que agrupa todos los componentes del sistema, lo que facilita
 la coherencia entre las distintas partes y simplifica el despliegue conjunto. El
 repositorio se estructura en cuatro bloques principales: la capa robótica
@@ -94,7 +94,9 @@ pila \gls{nav2} se ocupa de la planificación y el control del movimiento
 \parencite{macenski2020nav2}; \texttt{slam\_toolbox} construye el mapa del entorno
 mediante \gls{slam} láser \parencite{macenski2021slamtoolbox}; y
 \texttt{explore\_lite} dirige la exploración autónoma inicial que recorre el
-espacio desconocido hasta completar el mapa. Reutilizar estas soluciones, en lugar
+espacio desconocido hasta completar el mapa. Una vez construido y guardado el mapa, los
+arranques posteriores operan en modo de localización sobre él, con \gls{nav2} apoyándose
+en AMCL en lugar de en \gls{slam}. Reutilizar estas soluciones, en lugar
 de reimplementar la navegación, permite concentrar el trabajo en la orquestación y
 la integración del sistema.
 
@@ -104,8 +106,8 @@ La detección de personas se realiza con \gls{yolo} en su versión \textit{nano}
 (YOLOv8n), a través de la biblioteca de Ultralytics
 \parencite{jocher2023ultralytics}. Se ha optado por la variante \textit{nano} por
 ser la más ligera de la familia, lo que permite ejecutar la inferencia en la
-\gls{cpu} del propio robot a una velocidad suficiente para la patrulla, sin
-necesidad de una \gls{gpu} dedicada. La biblioteca aporta, además, modelos
+\acrshort{cpu} del propio robot a una velocidad suficiente para la patrulla, sin
+necesidad de una \acrshort{gpu} dedicada. La biblioteca aporta, además, modelos
 preentrenados y una interfaz sencilla que reduce el coste de integración. El
 tratamiento de las imágenes, esto es, la captura de los fotogramas de la cámara y
 la codificación del clip de vídeo de cada incidencia, se apoya en OpenCV,

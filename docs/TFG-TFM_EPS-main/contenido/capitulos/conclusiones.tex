@@ -9,8 +9,8 @@ futuro. Por último, se incluye una breve valoración personal.
 \section{Grado de consecución de los objetivos}
 \label{sec:consecucion-objetivos}
 
-El desarrollo de este Trabajo Fin de Grado ha permitido construir un sistema robótico de
-patrulla autónoma funcional e integrado. Retomando los objetivos específicos formulados en
+El desarrollo de este Trabajo ha permitido construir un sistema robótico de
+patrulla autónoma funcional. Retomando los objetivos específicos formulados en
 el Capítulo~\ref{cap:objetivos}, puede afirmarse que se ha implementado la cartografía
 autónoma del entorno mediante exploración y \gls{slam} (OE1) y la generación y ejecución de
 una ruta de cobertura con \gls{nav2} (OE2). El ciclo operativo se coordina mediante un
@@ -60,14 +60,24 @@ varias aportaciones concretas:
 \section{Limitaciones}
 \label{sec:limitaciones}
 
-El trabajo presenta varias limitaciones que conviene reconocer. La más relevante es que la
-validación realizada es funcional y se ha llevado a cabo en simulación, sin una campaña de
-medición cuantitativa sobre hardware real que respalde el rendimiento del sistema; las
-métricas de navegación, detección y latencia quedan, por tanto, sin caracterizar. Además, la
-estrategia de planificación de la ruta de cobertura es deliberadamente sencilla (un barrido
-en zig-zag) y puede resultar subóptima en estancias de geometría compleja. La detección se
-limita actualmente a la presencia de personas, sin seguimiento de objetos ni distinción
-entre individuos, lo que puede generar alertas redundantes ante una misma persona.
+El trabajo presenta varias limitaciones que conviene reconocer. La estrategia de
+planificación de la ruta de cobertura es deliberadamente sencilla (un barrido en zig-zag) y
+puede resultar subóptima en estancias de geometría compleja. La detección se limita
+actualmente a la presencia de personas, sin seguimiento de objetos ni distinción entre
+individuos, lo que puede generar alertas redundantes ante una misma persona. Además, la
+percepción depende de una única cámara frontal, de modo que el robot conserva ángulos ciegos
+a los lados y en la parte trasera durante la patrulla.
+
+En el tratamiento de las incidencias subsiste otra limitación: el sistema se queda en
+detectar la presencia de una persona, sin clasificar ni describir el suceso. Para
+enriquecer ese tratamiento se ingenió e intentó integrar un \gls{vlm} ligero,
+Qwen2.5-VL-3B-Instruct cuantizado a 4 bits, servido con vLLM a través de una API
+compatible con OpenAI, que clasificara y describiera en lenguaje
+natural cada incidencia a partir de su imagen. Sin embargo, no fue posible llevarlo a
+producción: el servicio de inferencia exige una \acrshort{gpu} con memoria suficiente, y el
+hardware del servidor no podía alojarlo a la vez que el resto del sistema (backend, bases de
+datos, mensajería y visualización), mientras que ejecutarlo en el propio robot tampoco era
+viable por sus recursos limitados. La integración se retoma como línea de trabajo futuro.
 
 En el plano de la seguridad deben reconocerse dos limitaciones conocidas: el patrón
 \gls{tofu} asume que el primer contacto del robot con el backend es legítimo, asunción que
@@ -100,11 +110,63 @@ futuro:
   \item \textbf{Notificaciones en tiempo real.} Avisar al usuario de forma inmediata ante
     una incidencia mediante notificaciones \textit{push} o canales de comunicación en tiempo
     real.
+  \item \textbf{Cobertura visual con cámara 360\textdegree.} Sustituir o complementar la
+    cámara frontal por una cámara de 360\textdegree{} que elimine los ángulos ciegos del
+    robot durante la patrulla.
+  \item \textbf{Clasificación y descripción de incidencias con un \gls{vlm}.} Retomar la
+    integración del modelo de lenguaje y visión ligero (Qwen2.5-VL servido con vLLM) sobre
+    hardware de inferencia dedicado o un servicio externo, para enriquecer cada incidencia
+    con una etiqueta y una descripción en lenguaje natural, a partir del intento descrito en
+    la Sección~\ref{sec:limitaciones}.
+
+    En relación con esta última línea, el extracto~\ref{lst:vllm} recoge la configuración del
+servicio de inferencia con vLLM (\texttt{vllm/docker-compose.yml}) que se preparó durante el
+intento descrito en la Sección~\ref{sec:limitaciones} y que constituye el punto de partida
+para retomarla.
+
+\SuspendTagging{code}%
+\begin{yamlcode}[title={Servicio de inferencia con vLLM (vllm/docker-compose.yml)}, label={lst:vllm}]
+services:
+  vllm:
+    image: vllm/vllm-openai:latest
+    container_name: qwen25-vl-3b
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    shm_size: "8gb"
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+    ports:
+      - "8000:8000"
+    ipc: host
+    command: >
+      --model unsloth/Qwen2.5-VL-3B-Instruct-unsloth-bnb-4bit
+      --tokenizer Qwen/Qwen2.5-VL-3B-Instruct
+      --served-model-name qwen2.5-vl-3b
+      --quantization bitsandbytes
+      --load-format bitsandbytes
+      --dtype bfloat16
+      --max-model-len 32768
+      --gpu-memory-utilization 0.8
+      --max-num-seqs 4
+      --limit-mm-per-prompt '{"image":2}'
+      --trust-remote-code
+    restart: unless-stopped
+\end{yamlcode}%
+\ResumeTagging{code}
+
   \item \textbf{Planificación de cobertura avanzada.} Sustituir la rejilla en zig-zag por
     estrategias de cobertura más eficientes y adaptadas a la geometría del entorno.
   \item \textbf{Operación multirobot.} Extender el sistema para coordinar varios robots
     patrullando un mismo espacio.
 \end{itemize}
+
+
 
 %% =============================================================================
 \section{Valoración personal}
