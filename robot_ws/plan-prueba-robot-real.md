@@ -11,6 +11,28 @@ mismas; aquí se detalla qué cambia al pasar a real.
 
 ---
 
+## 0. Qué evidencia rellena la memoria (`tab:pruebas-real`)
+
+El capítulo de Resultados de la memoria (§6.6, «Pruebas en el robot real») incluye la
+tabla `tab:pruebas-real`, con una fila por hito de integración. Cada fila se rellena con
+la evidencia que produce una de las fases de abajo. Ejecuta las fases, marca el resultado
+(**Verificado** / **Parcial** / **No alcanzado**) y guarda la captura o el log como prueba.
+
+| Fila de `tab:pruebas-real` | Fase que la produce | Evidencia a guardar |
+|---|---|---|
+| Arranque del sistema a bordo | Fases A–D (nodos en la RPi) | `ros2 node list` con los 4 nodos vivos; logs de arranque |
+| Comunicación con el backend | Fase C (`secret_helper`) | `get_robot_token` → `success: true` + JWT; `curl` al backend con `200` |
+| Recepción de telemetría | Fase A + backend | Puntos en InfluxDB y panel de Grafana (captura) |
+| Orden desde la aplicación | Fase D (comandos remotos) | `start_patrol`/`stop_patrol` desde la app → el robot reacciona |
+| Movimiento y localización | Fase D (patrulla) | El robot se desplaza (EXPLORING/PATROLLING) y se localiza (AMCL) |
+| Registro de una incidencia | Fase B (`detect_incident`) | Persona real → clip en MinIO → `robot_incidents` → incidencia en la app |
+
+> Si alguna fila queda en **Parcial** o **No alcanzado**, anota el motivo concreto (qué
+> falló): es exactamente lo que la memoria pide documentar con naturalidad en §6.6, y la
+> foto o el log del robot alimentan la figura `fig:robot-real`.
+
+---
+
 ## 1. Topología y dónde corre cada cosa
 
 ```

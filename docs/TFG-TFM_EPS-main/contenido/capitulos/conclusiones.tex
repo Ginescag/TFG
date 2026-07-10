@@ -22,10 +22,16 @@ con persistencia de datos relacionales, de vídeo y de series temporales (OE6). 
 ha implementado el esquema de seguridad basado en \gls{tofu}, \gls{jwt} y control de acceso
 por roles (OE7) y se ha construido la aplicación de usuario multiplataforma con
 \mbox{Flutter} (OE8). Por último, la integración de todos los subsistemas en una solución
-desplegable mediante contenedores se ha completado en su vertiente funcional, validada de
-extremo a extremo en simulación (OE9), si bien la evaluación cuantitativa sobre hardware
-real queda pendiente.
+desplegable mediante contenedores se ha completado y validado de extremo a extremo en
+simulación (OE9).
 
+Conviene diferenciar el nivel de evidencia que respalda cada afirmación. Todo el ciclo se ha
+validado de extremo a extremo en simulación, sobre la misma pila de software que ejecutaría el
+robot. Además, una parte del sistema se ejercitó sobre el \mbox{TurtleBot~4} físico, donde la
+autenticación, la telemetría, la cadena de mando del orquestador y la activación de la navegación
+funcionaron sin modificar el software (Sección~\ref{sec:pruebas-real}). Lo que no llegó a
+completarse fue una evaluación cuantitativa en condiciones reales, limitada por factores externos
+al proyecto y planteada como trabajo futuro.
 %% =============================================================================
 \section{Aportaciones}
 \label{sec:aportaciones}
@@ -181,6 +187,6 @@ sus partes, ha sido la faceta más exigente y, a la vez, la más enriquecedora d
 Más allá del resultado técnico, considero que la principal lección ha sido la importancia de
 un buen diseño arquitectónico: las decisiones tomadas al principio, en especial el
 desacoplamiento mediante eventos, condicionaron favorablemente todo el desarrollo posterior
-y facilitaron cada incorporación sucesiva. Llevar el sistema hasta su validación sobre
-hardware real y completar su evaluación cuantitativa es el paso natural con el que me
+y facilitaron cada incorporación sucesiva. Llevar el sistema hasta completar su validación
+sobre hardware real y su evaluación cuantitativa es el paso natural con el que me
 gustaría dar continuidad a lo aquí construido.

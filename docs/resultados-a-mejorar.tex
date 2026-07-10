@@ -1,0 +1,647 @@
+\chapter{Resultados}
+\label{cap:resultados}
+
+Este capítulo presenta los resultados del trabajo. La evaluación se ha realizado en un
+entorno de simulación que reproduce la pila de software completa del robot y permite
+ejercitar el sistema de extremo a extremo. Sobre ese entorno se aporta una doble
+evidencia: una \textbf{validación funcional}, que comprueba que el ciclo operativo
+completo se ejecuta de principio a fin, y un primer conjunto de \textbf{métricas
+cuantitativas} de cartografía, navegación, detección y rendimiento. Adicionalmente, la
+Sección~\ref{sec:pruebas-real} recoge una campaña preliminar sobre el \mbox{TurtleBot~4}
+físico que valida en hardware real varios de los subsistemas y documenta las limitaciones
+halladas en el despliegue.
+
+%% =============================================================================
+\section{Entorno y escenario de pruebas}
+\label{sec:entorno-pruebas}
+
+La evaluación se ha llevado a cabo en simulación, sobre el modelo del \mbox{TurtleBot~4}
+ejecutado en \textit{Gazebo}, con \textit{RViz} como herramienta de visualización del
+estado del robot, los sensores y el mapa. El mundo simulado es un entorno interior de tipo
+laberinto, con varios corredores y bifurcaciones, que ejercita la navegación a través de
+pasillos estrechos y giros. Este entorno integra la misma pila de software que se
+ejecutaría sobre el robot físico (\gls{ros} Humble, \gls{nav2}, \texttt{slam\_toolbox} y
+\texttt{explore\_lite}), de modo que los nodos propios del proyecto y el backend operan sin
+cambios respecto al despliegue real. Esta equivalencia permite ejercitar la lógica completa
+del sistema (la máquina de estados del orquestador, la generación de la ruta, la detección
+y los flujos de datos) sin depender todavía del hardware.
+
+\begin{notebox}{Escenario de la campaña sobre hardware real}
+  La campaña sobre el robot físico se desarrolló en un laboratorio interior. Su escenario,
+  metodología y resultados —incluidas las limitaciones detectadas en el despliegue— se
+  describen en la Sección~\ref{sec:pruebas-real}.
+\end{notebox}
+
+%% =============================================================================
+\section{Validación funcional}
+\label{sec:validacion-funcional}
+
+En primer lugar, la validación se ha orientado a verificar la correcta integración de los
+subsistemas y la coherencia de los flujos de datos entre el robot, el bus de eventos, el
+backend y la aplicación de usuario. Sobre el entorno de simulación se ha ejercitado el
+ciclo operativo completo, comprobando que cada flujo descrito en el
+Capítulo~\ref{cap:desarrollo} se ejecuta de principio a fin y produce el efecto esperado en
+los almacenes de datos y en la interfaz.
+
+En particular, se ha confirmado que el robot explora el entorno y construye su mapa, que la
+\gls{fsm} encadena de forma autónoma las fases del ciclo (exploración, guardado,
+planificación y patrulla), que la ruta de cobertura se deriva del mapa y se recorre de forma
+cíclica, y que la detección de una persona dispara el registro de una incidencia con su
+vídeo asociado. Asimismo, se ha verificado que la telemetría llega a InfluxDB y se visualiza
+en Grafana, y que las órdenes emitidas desde la aplicación (iniciar, detener y reinstalar la
+patrulla) se propagan hasta el robot y se reflejan en su estado. La
+tabla~\ref{tab:validacion} resume estas comprobaciones.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Resumen de la validación funcional realizada en simulación. Fuente:
+  elaboración propia.}
+  \label{tab:validacion}
+  \begin{tabular}{@{}>{\raggedright\arraybackslash}p{4.3cm}
+                     >{\raggedright\arraybackslash}p{6.2cm}
+                     >{\raggedright\arraybackslash}p{2.7cm}@{}}
+    \toprule
+    \textbf{Flujo o prueba} & \textbf{Cobertura} & \textbf{Resultado} \\
+    \midrule
+    Autenticación del robot & \gls{tofu}, autenticación y refresco del \gls{jwt} &
+    Verificado (sim.) \\
+    \addlinespace[3pt]
+    Exploración y mapeo & \texttt{explore\_lite} y \texttt{slam\_toolbox} &
+    Verificado (sim.) \\
+    \addlinespace[3pt]
+    Guardado del mapa & Servicio \texttt{map\_saver} &
+    Verificado (sim.) \\
+    \addlinespace[3pt]
+    Generación de la ruta & Barrido en zig-zag sobre el mapa &
+    Verificado (sim.) \\
+    \addlinespace[3pt]
+    Patrulla cíclica & Recorrido de \textit{waypoints} con \gls{nav2} &
+    Verificado (sim.) \\
+    \addlinespace[3pt]
+    Acople y desacople & Acciones \texttt{dock}/\texttt{undock} del Create~3 &
+    Verificado (sim.) \\
+    \addlinespace[3pt]
+    Localización sobre mapa guardado & \texttt{map\_server} y AMCL (modo localización) &
+    Verificado (sim.) \\
+    \addlinespace[3pt]
+    Detección de incidencia & \gls{yolo} $\rightarrow$ MinIO $\rightarrow$ Kafka
+    $\rightarrow$ registro & Verificado (sim.) \\
+    \addlinespace[3pt]
+    Telemetría & \texttt{serve\_telemetry} $\rightarrow$ InfluxDB $\rightarrow$ Grafana &
+    Verificado (sim.) \\
+    \addlinespace[3pt]
+    Control desde la aplicación & Iniciar, detener y reinstalar la patrulla &
+    Verificado (sim.) \\
+    \addlinespace[3pt]
+    Estado operativo & \textit{Heartbeat} $\rightarrow$ PostgreSQL $\rightarrow$ app &
+    Verificado (sim.) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Estas comprobaciones confirman que la arquitectura es coherente y que los subsistemas se
+integran según el diseño. A partir de ellas, las secciones siguientes cuantifican el
+comportamiento del sistema en simulación.
+
+%% =============================================================================
+\section{Resultados de simulación}
+\label{sec:resultados-sim}
+
+Más allá de la validación funcional, sobre el mismo entorno de simulación se ha recogido un
+primer conjunto de métricas cuantitativas, organizadas según las dimensiones definidas en
+la Sección~\ref{sec:metricas}: cartografía y navegación, detección de incidencias y
+rendimiento de extremo a extremo.
+
+% ---------------------------------------------------------------------------
+\subsection{Cartografía y ruta de patrulla}
+\label{sec:resultados-cartografia}
+
+El robot explora el entorno de forma autónoma con \texttt{explore\_lite} mientras
+\texttt{slam\_toolbox} construye el mapa de ocupación (figura~\ref{fig:mapa-slam}). A partir
+de ese mapa, el orquestador deriva la ruta de cobertura en zig-zag y la recorre de forma
+cíclica; la figura~\ref{fig:ruta-patrulla} muestra la trayectoria seguida sobre el mapa ya
+consolidado.
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}[t]{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth, alt={Mapa de ocupación construido por SLAM durante la exploración, visualizado en RViz}]{recursos/figuras/resultados/mapa-slam.png}
+    \caption{Mapa construido por SLAM.}
+    \label{fig:mapa-slam}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[t]{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth, alt={Ruta de patrulla recorrida por el robot sobre el mapa, visualizada en RViz}]{recursos/figuras/resultados/ruta-patrulla.png}
+    \caption{Ruta de patrulla sobre el mapa.}
+    \label{fig:ruta-patrulla}
+  \end{subfigure}
+  \caption[Mapa y ruta de patrulla en simulación]{Cartografía y patrulla en simulación
+    (RViz): (a)~mapa de ocupación construido por \texttt{slam\_toolbox} durante la
+    exploración (blanco: espacio libre; rosa y morado: paredes y su inflado; gris: sin
+    explorar); (b)~trayectoria de la patrulla (en rojo) sobre el mapa consolidado, derivada
+    del barrido en zig-zag del espacio libre. Fuente: elaboración propia.}
+  \label{fig:mapa-ruta}
+\end{figure}
+
+El mapa resultante, guardado con resolución de 0,05\,m por celda, cubre un lienzo de
+$390\times401$ celdas (unos $19{,}5\times20{,}1$\,m). De la región ya explorada, en torno al
+96{,}5\,\% de las celdas corresponde a espacio libre y el 3{,}5\,\% restante a paredes, lo
+que arroja un área libre navegable de aproximadamente $185{,}5$\,m\textsuperscript{2}. La
+tabla~\ref{tab:metricas-navegacion} recoge estas magnitudes junto con las métricas de
+navegación que completan la corrida de patrulla.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Métricas de cartografía y navegación en simulación. Fuente: elaboración propia.}
+  \label{tab:metricas-navegacion}
+  \begin{tabular}{@{}>{\raggedright\arraybackslash}p{7.5cm} l l@{}}
+    \toprule
+    \textbf{Métrica} & \textbf{Unidad} & \textbf{Valor} \\
+    \midrule
+    Resolución del mapa                      & m/celda & 0,05 \\
+    Extensión cartografiada (lienzo)         & m       & 19,5 $\times$ 20,1 \\
+    Área libre navegable                     & m\textsuperscript{2} & $\approx$185,5 \\
+    Paredes sobre la región explorada        & \%      & 3,5 \\
+    Tiempo de exploración del mapa           & s       & 840 \\
+    Waypoints generados en la ruta           & nº      & 29  \\
+    Waypoints alcanzados sin intervención    & \%      & 29  \\
+    Comportamientos de recuperación de Nav2  & nº      & 2   \\
+    Colisiones durante la patrulla           & nº      & 0   \\
+    Tiempo por ciclo de patrulla             & s       & 1200\\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{notebox}{Inciso sobre la obtención de métricas en simulación}
+  Las métricas de la tabla~\ref{tab:metricas-navegacion} de carácter temporal resultan afectadas por 
+la velocidad de simulación, que depende de la carga de la máquina y de la complejidad del
+mundo virtual.
+\end{notebox}
+
+% ---------------------------------------------------------------------------
+\subsection{Detección de incidencias}
+\label{sec:resultados-deteccion}
+
+La capacidad de detección se evalúa sobre un escenario controlado en simulación, con 162
+apariciones en posiciones e instantes conocidos durante la patrulla: 120 de personas y 42 de
+objetos que no lo son, entre ellos un maniquí de apariencia humana como caso deliberadamente
+ambiguo. El nodo \texttt{detect\_incident} aplica el modelo YOLOv8n a cada fotograma y, al
+superar el umbral de confianza, dispara la incidencia. La figura~\ref{fig:deteccion-sim}
+ilustra una detección durante la simulación. Comparando las apariciones reales con las
+detecciones se obtienen los verdaderos y falsos positivos y los falsos negativos, y de ellos
+la precisión y el \textit{recall}; la tabla~\ref{tab:metricas-deteccion} recoge estos valores
+junto con la confianza media y el tiempo de inferencia.
+
+\begin{figure}[H]
+  \centering
+  \IfFileExists{recursos/figuras/resultados/deteccion-sim.png}
+    {\includegraphics[width=0.72\textwidth, alt={El robot detecta a una persona en la simulación}]{recursos/figuras/resultados/deteccion-sim.png}}
+    {\fbox{\parbox[c][5cm][c]{0.72\textwidth}{\centering\itshape Captura de la detección de
+      una persona en simulación (pendiente de incorporar en
+      \texttt{recursos/figuras/resultados/deteccion-sim.png}).}}}
+  \caption[Detección de una persona en simulación]{Detección de una persona durante la
+    patrulla en simulación, que dispara el registro de la incidencia. Fuente: elaboración
+    propia.}
+  \label{fig:deteccion-sim}
+\end{figure}
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Métricas de detección sobre el escenario controlado en simulación. Fuente:
+  elaboración propia.}
+  \label{tab:metricas-deteccion}
+  \begin{tabular}{@{}>{\raggedright\arraybackslash}p{7.5cm} l l@{}}
+    \toprule
+    \textbf{Métrica} & \textbf{Unidad} & \textbf{Valor} \\
+    \midrule
+    Apariciones evaluadas                     & nº     & 162 \\
+    \quad de persona (positivos reales)       & nº     & 120 \\
+    \quad de no-persona (negativos reales)    & nº     & 42 \\
+    Verdaderos positivos                      & nº     & 120 \\
+    Falsos negativos                          & nº     & 0 \\
+    Falsos positivos                          & nº     & 7 \\
+    Verdaderos negativos                      & nº     & 35 \\
+    Precisión                                 & [0, 1] & 0,945 \\
+    \textit{Recall}                           & [0, 1] & 1,000 \\
+    Confianza media de detección              & [0, 1] & 0,899 \\
+    Tiempo de inferencia                      & ms/fotograma & 80,3 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+El detector se enfrentó a 162 apariciones controladas durante la patrulla, de las cuales 120
+correspondían a personas y 42 a objetos de otra naturaleza. Sobre las 120 apariciones de
+persona el modelo acertó en todas, sin un solo falso negativo, y lo hizo con una confianza
+media de 0,899, lo que indica detecciones no solo correctas sino también firmes. El
+\textit{recall} resultante es, por tanto, perfecto (1,000).
+
+Frente a las 42 apariciones que no eran personas, el modelo las descartó correctamente en 35
+ocasiones y se equivocó en 7, todas ellas sobre un maniquí de apariencia humana, el caso más
+exigente del conjunto. Esos siete falsos positivos son la única fuente de error y rebajan la
+precisión a 0,945, un valor todavía elevado y coherente con un sistema cuya prioridad es no
+pasar por alto a ninguna persona. El tiempo medio de inferencia fue de 80,3\,ms por fotograma;
+conviene precisar que se midió sobre la \acrshort{cpu} del equipo de simulación y no sobre el
+hardware del robot, por lo que constituye una referencia en ese entorno y no el rendimiento
+esperable a bordo.
+
+% ---------------------------------------------------------------------------
+\subsection{Validación del flujo de extremo a extremo}
+\label{sec:resultados-e2e}
+
+Por último, se valida el flujo completo de notificación de principio a fin. En simulación se ha
+comprobado que una incidencia detectada por el robot recorre toda la cadena sin intervención
+manual: el nodo \texttt{detect\_incident} publica el evento en Kafka, el consumidor del backend
+lo registra como un \texttt{Incidente} en PostgreSQL y la aplicación lo lista y reproduce el
+clip almacenado en MinIO. De forma análoga, la telemetría que el robot publica una vez por
+segundo llega a InfluxDB y se visualiza en Grafana (figura~\ref{fig:grafana}), y el
+\textit{heartbeat} de estado, emitido cada diez segundos, actualiza el estado operativo que la
+aplicación refleja en la pantalla de inicio. El sistema funciona, por tanto, de extremo a
+extremo en simulación.
+
+La latencia absoluta percibida, desde que la persona aparece hasta que la incidencia es visible
+en la aplicación, no se reporta en este entorno: el simulador opera por debajo del tiempo real y
+el clip incorpora además un tramo de fotogramas posteriores grabados a la cadencia reducida de
+la cámara simulada, de modo que cualquier medida en reloj de pared resultaría inflada y no
+representativa. Su caracterización se reserva para la campaña sobre hardware real
+(sección~\ref{sec:pruebas-real}). Sí se recogen, en cambio, las magnitudes cuyo valor no depende
+del factor de tiempo real de la simulación, por ejecutarse en el anfitrión o por referirse a la
+fiabilidad del flujo, que la tabla~\ref{tab:metricas-e2e} resume.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Métricas del flujo de extremo a extremo medibles en simulación, independientes del
+  factor de tiempo real. Fuente: elaboración propia.}
+  \label{tab:metricas-e2e}
+  \begin{tabular}{@{}>{\raggedright\arraybackslash}p{7.5cm} l l@{}}
+    \toprule
+    \textbf{Métrica} & \textbf{Unidad} & \textbf{Valor} \\
+    \midrule
+    Telemetría recibida frente a la esperada (1\,Hz nominal)      & \% & 100 \\
+    Latencia evento en Kafka $\rightarrow$ registro en PostgreSQL & ms & 503 \\
+    Tiempo de subida del clip a MinIO (media de 20 incidencias)   & s  & 3,7 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Las magnitudes recogidas confirman la solidez del flujo en el lado del servidor, cuyo rendimiento
+no depende de la velocidad de la simulación. La telemetría se recibió sin pérdidas, con todos los
+puntos esperados a la cadencia nominal de un punto por segundo. La subida de cada clip de
+incidencia a MinIO tardó 3,7\,s de media sobre veinte incidencias, un tiempo dominado por la
+escritura y la transferencia del vídeo. Por último, la latencia desde la llegada del evento a
+Kafka hasta su registro en PostgreSQL fue de 503\,ms; este valor está dominado por el ciclo de
+sondeo del consumidor, que espera los mensajes en intervalos de hasta un segundo
+(\texttt{poll(1.0)}), más que por el procesamiento o la escritura en la base de datos, y podría
+reducirse acortando ese intervalo.
+
+%% =============================================================================
+\section{Pruebas en el robot real}
+\label{sec:pruebas-real}
+
+Además de la evaluación en simulación, se llevó a cabo una campaña de pruebas sobre el
+\mbox{TurtleBot~4} físico en un laboratorio interior. Esta campaña persigue un doble
+objetivo: comprobar que la pila de software del proyecto opera sin cambios contra el
+hardware real y detectar aquellos aspectos que la simulación no revela, como la dinámica de
+los sensores reales, la sincronización de relojes entre dispositivos y el comportamiento de
+la red de despliegue bajo carga. Los resultados son de carácter \emph{preliminar}: varios
+subsistemas quedaron validados de extremo a extremo en el robot real, mientras que la
+validación completa del ciclo de patrulla y de la detección se vio limitada por dos factores
+ajenos al software desarrollado —la estabilidad del transporte de datos en el banco de
+pruebas y una avería intermitente de la cámara— que se documentan y cuantifican a
+continuación.
+
+% ---------------------------------------------------------------------------
+\subsection{Entorno y metodología}
+\label{sec:real-entorno}
+
+El robot es un \mbox{TurtleBot~4} (base iRobot Create~3, Raspberry~Pi~4, \gls{lidar} RPLIDAR
+y cámara OAK-D-LITE) conectado a una red wifi aislada, sin salida a Internet. El equipo de
+desarrollo es un portátil con Windows~10 que, por las limitaciones de su subsistema de
+virtualización de red para el descubrimiento \gls{dds}, ejecuta el software del proyecto
+dentro de una máquina virtual (VirtualBox, Ubuntu~22.04) configurada con adaptador de red en
+modo puente sobre la interfaz wifi. De este modo la máquina virtual obtiene una dirección
+propia en la subred del robot y los contenedores \gls{ros} de la pila arrancan con la red del
+anfitrión, condición necesaria para el tráfico \gls{dds} bidireccional. El descubrimiento de
+nodos se resuelve con una arquitectura de doble servidor de descubrimiento (el del robot y
+uno local en la máquina virtual) que evita la saturación observada cuando la decena de nodos
+de \gls{nav2} intentaban descubrirse entre sí a través de la red inalámbrica.
+
+La metodología de cada sesión consistió en levantar la infraestructura de \emph{backend}
+(Kafka, MinIO, PostgreSQL, InfluxDB, Grafana y la \gls{api}) en la máquina virtual, arrancar
+el servidor de descubrimiento y el \emph{bringup} de navegación contra el robot, lanzar los
+nodos del proyecto y, finalmente, emitir la orden de inicio de patrulla desde la aplicación a
+través de Kafka. La observación se apoyó en cuatro fuentes simultáneas: los registros de los
+nodos, la visualización en RViz del mapa y los sensores, los cuadros de mando de Grafana y la
+propia aplicación de usuario.
+
+\begin{notebox}{Naturaleza del banco de pruebas}
+  El banco de pruebas —máquina virtual con red puenteada sobre wifi doméstica— introduce una
+  capa de virtualización y un enlace inalámbrico entre los nodos de cómputo y el robot. Como
+  se verá, esta capa condiciona el rendimiento del transporte bajo carga y constituye la
+  principal limitación de la campaña, no atribuible al software del proyecto.
+\end{notebox}
+
+% ---------------------------------------------------------------------------
+\subsection{Sincronización temporal: los tres relojes}
+\label{sec:real-relojes}
+
+El primer obstáculo específico del hardware real fue la sincronización horaria. A diferencia
+de la simulación, donde existe un único reloj, en el robot real intervienen \textbf{tres
+relojes independientes}: la Raspberry~Pi (que marca la hora de los mensajes del \gls{lidar}),
+la base Create~3 (que marca la odometría y las transformadas) y la máquina virtual. Cualquier
+desfase entre ellos provoca que \texttt{slam\_toolbox} descarte los escaneos por llegar con
+una marca temporal anterior a los datos disponibles en la caché de transformadas, con el
+consiguiente colapso del mapeo. Un agravante adicional es que las \emph{Guest Additions} de
+VirtualBox reimponen periódicamente la hora del anfitrión sobre la máquina virtual, deshaciendo
+el trabajo del demonio de sincronización.
+
+La solución adoptada combina tres medidas: sincronizar la máquina virtual contra la
+Raspberry~Pi mediante \texttt{chrony}; deshabilitar la sincronización horaria de VirtualBox
+para que no compita con \texttt{chrony}; y, cuando el desfase de la base Create~3 es grande,
+forzar su resincronización por NTP o reiniciarla. La verificación se realizó comparando las
+marcas de tiempo justo antes de cada prueba: la diferencia entre la Raspberry~Pi y la máquina
+virtual quedó en el orden de unos pocos milisegundos, y la de la base Create~3 en cero
+segundos.
+
+\begin{terminal}[title={Verificación de la sincronización de los tres relojes}]
+$ ssh ubuntu@192.168.31.191 'date +%s.%N'; date +%s.%N
+1783088693.619321844        # Raspberry Pi
+1783088693.626592666        # maquina virtual  -> diferencia ~ 7 ms
+
+$ ros2 topic echo /turtlebot4/odom --field header.stamp --once; date +%s
+sec: 1783088743             # marca temporal de la base Create 3 (odometria)
+1783088743                  # reloj de la maquina virtual  -> diferencia 0 s
+\end{terminal}
+
+% ---------------------------------------------------------------------------
+\subsection{Subsistemas validados en hardware real}
+\label{sec:real-validados}
+
+Sobre el robot físico quedaron validados de extremo a extremo la autenticación, la telemetría
+y la cadena de mando del orquestador.
+
+\textbf{Autenticación (\texttt{secret\_helper}).} El nodo completó el proceso de \gls{tofu}
+contra el \emph{backend} real: obtuvo y persistió el secreto raíz en el primer arranque y
+canjeó a continuación el \gls{jwt}. La figura~\ref{fig:real-tofu} muestra la traza simultánea
+del nodo y del \emph{backend}, donde se observan las peticiones \texttt{first-boot} y
+\texttt{auth} resueltas con código~200.
+
+\begin{terminal}[title={Traza del nodo secret\_helper en el primer arranque real}]
+[secret_helper_node]: Iniciando rutina de autenticacion y gestion de secretos...
+[secret_helper_node]: No hay secreto guardado. Intentando proceso de First Boot (TOFU)...
+[secret_helper_node]: Secreto raiz obtenido y guardado en disco con exito.
+[secret_helper_node]: Contactando al backend para obtener JWT...
+[secret_helper_node]: JWT obtenido/refrescado exitosamente.
+\end{terminal}
+
+\begin{figure}[H]
+  \centering
+  \IfFileExists{recursos/figuras/resultados/real-tofu.png}
+    {\includegraphics[width=0.92\textwidth, alt={Terminal del nodo secret_helper y del backend mostrando el proceso TOFU y las peticiones first-boot y auth resueltas con codigo 200}]{recursos/figuras/resultados/real-tofu.png}}
+    {\fbox{\parbox[c][4.5cm][c]{0.92\textwidth}{\centering\itshape Captura del proceso de
+      autenticación \gls{tofu} en el robot real: traza del nodo \texttt{secret\_helper} y del
+      \emph{backend} (peticiones \texttt{first-boot}/\texttt{auth} con código~200). Pendiente
+      de incorporar en \texttt{recursos/figuras/resultados/real-tofu.png}.}}}
+  \caption[Autenticación TOFU en el robot real]{Autenticación del robot real: el nodo
+    \texttt{secret\_helper} ejecuta el \gls{tofu}, obtiene el secreto raíz y canjea el
+    \gls{jwt}; el \emph{backend} registra las peticiones \texttt{first-boot} y \texttt{auth}.
+    Fuente: elaboración propia.}
+  \label{fig:real-tofu}
+\end{figure}
+
+\textbf{Telemetría (\texttt{serve\_telemetry}) y control.} La telemetría del robot (batería,
+odometría y estado de acople, entre otros) fluyó desde el robot hasta InfluxDB y se visualizó
+en Grafana, generándose datos de movimiento mediante teleoperación. Asimismo, la aplicación de
+usuario reflejó en tiempo real el estado operativo del robot durante la prueba
+(figura~\ref{fig:real-warden}), lo que confirma la cadena completa robot~$\rightarrow$~bus de
+eventos~$\rightarrow$~\emph{backend}~$\rightarrow$~aplicación sobre hardware real.
+
+\begin{figure}[H]
+  \centering
+  \IfFileExists{recursos/figuras/resultados/real-warden.png}
+    {\includegraphics[width=0.55\textwidth, alt={Aplicacion Warden mostrando el robot LABORATORIO en estado exploring, preparando patrulla}]{recursos/figuras/resultados/real-warden.png}}
+    {\fbox{\parbox[c][5cm][c]{0.55\textwidth}{\centering\itshape Captura de la aplicación de
+      usuario mostrando el estado del robot real («explorando / preparando patrulla»).
+      Pendiente de incorporar en \texttt{recursos/figuras/resultados/real-warden.png}.}}}
+  \caption[Estado del robot real en la aplicación]{La aplicación de usuario refleja en tiempo
+    real el estado operativo del robot físico durante la prueba (fase de exploración),
+    evidenciando el flujo de estado y telemetría de extremo a extremo. Fuente: elaboración
+    propia.}
+  \label{fig:real-warden}
+\end{figure}
+
+% ---------------------------------------------------------------------------
+\subsection{Navegación y patrulla: validación parcial}
+\label{sec:real-navegacion}
+
+Con los relojes sincronizados y \gls{nav2} activo, el robot inició la construcción del mapa
+del laboratorio. El mapa creció de forma efectiva —el \emph{costmap} pasó de $156\times181$ a
+$159\times183$ celdas a 0,05\,m/celda, cubriendo una estancia de aproximadamente
+$7{,}9\times9{,}2$\,m— pero lo hizo a un ritmo intermitente y con artefactos, y la exploración
+nunca llegó a completarse. La figura~\ref{fig:real-mapa} muestra el mapa parcial obtenido.
+
+Adicionalmente, el \emph{bringup} de navegación completó su arranque contra el robot real:
+\texttt{slam\_toolbox} registró el \gls{lidar}, \gls{nav2} activó sus servidores hasta el
+mensaje \texttt{Nav2 is ready for use!}, y la orden \texttt{start\_patrol} emitida por Kafka
+desde la aplicación fue consumida por el orquestador, cuya \gls{fsm} transitó del estado de
+reposo al de exploración lanzando el nodo \texttt{explore\_lite}. Las acciones de acople y
+desacople del Create~3 respondieron correctamente. Es decir, la lógica de integración
+—máquina de estados, activación de \gls{nav2} y cadena de mando— quedó demostrada sobre el
+hardware.
+
+\begin{figure}[H]
+  \centering
+  \IfFileExists{recursos/figuras/resultados/real-mapa-lab.png}
+    {\includegraphics[width=0.7\textwidth, alt={Mapa parcial del laboratorio en RViz, con artefactos radiales debidos a la entrega degradada del escaner laser}]{recursos/figuras/resultados/real-mapa-lab.png}}
+    {\fbox{\parbox[c][6cm][c]{0.7\textwidth}{\centering\itshape Captura de RViz con el mapa
+      parcial del laboratorio construido durante la exploración en el robot real. Pendiente de
+      incorporar en \texttt{recursos/figuras/resultados/real-mapa-lab.png}.}}}
+  \caption[Mapeo del laboratorio en el robot real]{Mapa parcial del laboratorio construido por
+    \texttt{slam\_toolbox} durante la exploración en el robot real, visualizado en RViz. Los
+    artefactos radiales son consecuencia de la entrega degradada del escáner láser bajo carga
+    de red (véase el texto). Fuente: elaboración propia.}
+  \label{fig:real-mapa}
+\end{figure}
+
+La causa se aisló de forma sistemática. Descartados el desfase de relojes (verificado a cero
+segundos justo antes de la prueba), la saturación de \gls{cpu} (medida en torno al 89\,\% de
+inactividad) y la configuración del middleware (las transformadas y los mensajes pequeños
+fluían con normalidad y \gls{nav2} llegó a activarse), se midió la entrega del escáner láser
+(\texttt{/scan}) en dos condiciones: con el robot publicando en reposo y con la pila de
+navegación completa en marcha. El contraste, recogido en la tabla~\ref{tab:metricas-real-red},
+es concluyente.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Degradación de la entrega del escáner láser (\texttt{/scan}) en la máquina virtual,
+    medida en reposo frente a bajo carga de la pila de navegación. Fuente: elaboración propia.}
+  \label{tab:metricas-real-red}
+  \begin{tabular}{@{}>{\raggedright\arraybackslash}p{7.2cm} l l@{}}
+    \toprule
+    \textbf{Métrica} & \textbf{En reposo} & \textbf{Bajo carga} \\
+    \midrule
+    Frecuencia media de \texttt{/scan} (Hz)          & 7,86        & 0,60--1,25 \\
+    Desviación típica del intervalo (s)              & 0,006--0,008 & 2,5--2,8 \\
+    Intervalo máximo entre mensajes (s)              & 0,14        & 16,12 \\
+    Tamaño de cada mensaje (KB)                      & 8,71        & 8,71 \\
+    Caudal aproximado (KB/s)                         & $\approx$65  & --- \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Bajo carga, la frecuencia de entrega del escáner cayó de 7,86 a en torno a 0,6\,Hz (un factor
+de trece), la desviación típica del intervalo entre mensajes se disparó de unos 7\,ms a 2,8\,s
+(un factor de cuatrocientos) y se registraron huecos de hasta 16,12\,s entre escaneos
+consecutivos. Este último dato cierra el mecanismo causal: la caché de transformadas de
+\gls{nav2} retiene aproximadamente 10\,s de historia, de modo que un escaneo que llega con
+16\,s de retraso encuentra una caché cuyo dato más antiguo es \emph{posterior} a su propia
+marca temporal, y es descartado —exactamente el error observado de forma continua durante la
+sesión—. Privado del láser, \texttt{slam\_toolbox} construye el mapa a trompicones y
+\texttt{explore\_lite} no logra completar los objetivos de navegación.
+
+Es importante señalar que \textbf{no se trata de una saturación de ancho de banda}: el escáner
+son mensajes de 8,71\,KB a un caudal de apenas 0,5\,Mbps, muy por debajo de la capacidad de la
+red. La degradación aparece únicamente con la pila completa en marcha, lo que apunta a una
+contención en la capa de transporte y virtualización del banco de pruebas (el puente wifi de
+la máquina virtual y el tráfico \gls{dds} con reintentos de la decena de nodos de \gls{nav2})
+más que a un problema de la red inalámbrica en sí. Los datos son, por tanto, consistentes con
+un cuello de botella de transporte inducido por el entorno de pruebas, y no por el software del
+proyecto —cuya lógica de navegación se activó correctamente— ni por los relojes o la \gls{cpu},
+descartados por medición.
+
+% ---------------------------------------------------------------------------
+\subsection{Detección de incidencias: no evaluada por indisponibilidad del sensor}
+\label{sec:real-deteccion}
+
+La validación de \texttt{detect\_incident} sobre el robot real no pudo completarse por una
+avería intermitente de la cámara OAK-D-LITE, ajena al software del proyecto. El nodo en sí
+quedó verificado hasta donde el hardware lo permitió: arrancó correctamente, cargó el modelo
+YOLOv8n desde disco (sin acceso a Internet), se suscribió a la cámara con la política de
+calidad de servicio adecuada y estableció la conexión con MinIO y Kafka; sin embargo, nunca
+llegó a recibir un solo fotograma que procesar.
+
+El diagnóstico se realizó por descarte de capas. Se comprobó que el problema no era de calidad
+de servicio (el publicador de la cámara es fiable y emparejaba con el suscriptor), ni de la red
+(el fallo se reproducía en la propia Raspberry~Pi, sin enlace inalámbrico de por medio), ni del
+ahorro de energía del \emph{dock} (el robot estaba desacoplado). La evidencia decisiva se halló
+en el registro del sistema del robot, comparando dos arranques del servicio: en el arranque
+correcto, el controlador de la cámara se inicializa por completo; en el defectuoso, el
+componente no llega siquiera a instanciarse y el nodo del robot reclama en bucle un servicio de
+la cámara que no existe.
+
+\begin{terminal}[title={Registro del robot: arranque correcto de la camara (referencia)}]
+[turtlebot4.oakd]: Camera with MXID: 18443010E10E5F0E00 and Name: 1.1.1 connected!
+[turtlebot4.oakd]: USB SPEED: SUPER
+[turtlebot4.oakd]: Device type: OAK-D-LITE
+[turtlebot4.oakd]: Camera ready!
+\end{terminal}
+
+\begin{terminal}[title={Registro del robot: arranque defectuoso (sin controlador de camara)}]
+[turtlebot4_node]: OAKD started
+[turtlebot4_node] [ERROR]: Service oakd/start_camera unavailable.
+
+$ ros2 topic info /turtlebot4/oakd/rgb/preview/image_raw --verbose
+Type: sensor_msgs/msg/Image
+Publisher count: 0            # nadie publica: el controlador no se instancio
+\end{terminal}
+
+En el arranque defectuoso no aparece ninguna traza del controlador \emph{DepthAI} (ni
+\texttt{Camera ready!} ni la conexión del dispositivo) y el recuento de publicadores del tópico
+de imagen es cero, pese a que el nodo del robot da la cámara por iniciada. El fallo se mostró
+intermitente entre reinicios del servicio y se vio agravado por episodios de batería crítica
+del robot, que comprometen la alimentación de la cámara por el bus USB. Se concluye, por tanto,
+que la imposibilidad de evaluar la detección en el robot real obedece a una indisponibilidad del
+sensor —de naturaleza hardware e intermitente— y no a un defecto del nodo de detección, cuya
+funcionalidad quedó verificada en simulación (Sección~\ref{sec:resultados-deteccion}).
+
+% ---------------------------------------------------------------------------
+\subsection{Síntesis de la campaña real}
+\label{sec:real-sintesis}
+
+La tabla~\ref{tab:validacion-real} resume el estado de validación de cada subsistema sobre el
+hardware real. En conjunto, la campaña confirma que la arquitectura del proyecto opera contra
+el robot físico —autenticación, telemetría, cadena de mando y activación de la navegación
+quedaron demostradas— y acota con precisión, y mediante medidas, los dos factores que
+impidieron cerrar el ciclo completo: la degradación del transporte en el banco de pruebas y la
+avería del sensor de visión. Ambos son externos al software desarrollado, lo que refuerza la
+validez de la validación funcional obtenida en simulación (Sección~\ref{sec:validacion-funcional})
+y delimita el trabajo de despliegue restante.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Estado de validación de los subsistemas sobre el robot real. Fuente: elaboración
+    propia.}
+  \label{tab:validacion-real}
+  \begin{tabular}{@{}>{\raggedright\arraybackslash}p{4.6cm}
+                     >{\raggedright\arraybackslash}p{6.0cm}
+                     >{\raggedright\arraybackslash}p{2.6cm}@{}}
+    \toprule
+    \textbf{Subsistema} & \textbf{Observación en hardware real} & \textbf{Resultado} \\
+    \midrule
+    Conectividad y descubrimiento & Doble servidor de descubrimiento; transformadas y tópicos
+    del robot visibles & Validado \\
+    \addlinespace[3pt]
+    Sincronización temporal & Tres relojes sincronizados ($<$10\,ms) tras aislar VirtualBox &
+    Validado \\
+    \addlinespace[3pt]
+    Autenticación (\texttt{secret\_helper}) & \gls{tofu} y \gls{jwt} contra el \emph{backend}
+    real & Validado \\
+    \addlinespace[3pt]
+    Telemetría (\texttt{serve\_telemetry}) & Robot $\rightarrow$ InfluxDB $\rightarrow$ Grafana
+    y aplicación & Validado \\
+    \addlinespace[3pt]
+    Orquestación (\gls{fsm}) & Orden por Kafka; transición a exploración; acople/desacople &
+    Validado \\
+    \addlinespace[3pt]
+    \emph{Bringup} de \gls{nav2} & Arranque completo hasta \texttt{Nav2 is ready for use!} &
+    Validado \\
+    \addlinespace[3pt]
+    Cartografía y exploración & Mapa parcial; limitado por el jitter de transporte
+    (tabla~\ref{tab:metricas-real-red}) & Parcial \\
+    \addlinespace[3pt]
+    Detección (\texttt{detect\_incident}) & Nodo correcto; sensor no disponible (avería de la
+    cámara) & No evaluable \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+%% =============================================================================
+\section{Discusión}
+\label{sec:discusion}
+
+Los primeros resultados cuantitativos, obtenidos en simulación, junto con la validación
+funcional, permiten afirmar que la arquitectura propuesta es coherente y que sus componentes
+se integran según el diseño previsto. El desacoplamiento mediante el bus de eventos ha
+facilitado el desarrollo y la prueba de cada subsistema por separado: cada flujo se ha podido
+ejercitar de forma aislada y, después, en conjunto, sin que la indisponibilidad puntual de un
+componente bloqueara a los demás. Este comportamiento respalda la decisión de diseño
+adoptada.
+
+La campaña preliminar sobre el robot real (Sección~\ref{sec:pruebas-real}) respalda esta
+lectura: la autenticación, la telemetría, la cadena de mando del orquestador y la activación
+de \gls{nav2} funcionaron contra el hardware sin modificar el software, y el desacoplamiento
+por eventos permitió, de nuevo, que la indisponibilidad de un sensor no bloqueara al resto del
+sistema. Los dos factores que impidieron cerrar el ciclo completo —la degradación del
+transporte de datos bajo carga en el banco de pruebas y una avería intermitente de la cámara—
+se aislaron y, en el primer caso, se cuantificaron, resultando ambos externos a la arquitectura
+propuesta.
+
+No obstante, la validación tiene límites que conviene reconocer. El entorno
+simulado no reproduce con fidelidad la dinámica del robot real, el ruido de los sensores ni
+las condiciones de iluminación, factores que inciden directamente tanto en la navegación
+como en la percepción; y la campaña real, de carácter preliminar, no llegó a producir las
+métricas cuantitativas de cartografía, detección y latencia en condiciones reales. Por ello,
+las principales incógnitas que una campaña sobre hardware real más extensa deberá despejar
+son el comportamiento de la navegación en presencia de obstáculos dinámicos, la fiabilidad del
+detector en condiciones reales de iluminación y la latencia del flujo completo de
+notificación, para lo cual será preciso además mitigar la limitación de transporte
+identificada (por ejemplo, con un equipo de cómputo nativo en la red del robot o ejecutando la
+navegación a bordo). Estas cuestiones se retoman, junto con las limitaciones del
+trabajo, en el Capítulo~\ref{cap:conclusiones}.
